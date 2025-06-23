@@ -5,26 +5,21 @@ import MapSidebar from './MapSidebar';     // Импортируем компо�
 import * as L from 'leaflet';              // Импортируем библиотеку Leaflet для работы с геометрией
 import './Map.css';                        // CSS-файл для специфичных стилей карты (если нужен)
 
-// PolygonDrawMap теперь принимает handleLogout как проп из App.js
-export default function PolygonDrawMap({ handleLogout }) {
-  // Состояние для хранения всех нарисованных полигонов
-  const [polygons, setPolygons] = useState([]);
-  // Состояние для отслеживания, находится ли пользователь в режиме рисования
-  const [isDrawing, setIsDrawing] = useState(false);
-  // Состояние для отслеживания, находится ли пользователь в режиме редактирования
-  const [isEditingMode, setIsEditingMode] = useState(false);
-  // Состояние для хранения ID выбранного полигона (для выделения в сайдбаре и на карте)
-  const [selectedPolygon, setSelectedPolygon] = useState(null);
-  // Состояние для хранения списка культур, полученных из API
-  const [crops, setCrops] = useState([]);
-  // Состояние для отслеживания загрузки списка культур
-  const [loadingCrops, setLoadingCrops] = useState(false);
-  // Состояние для хранения ошибок при загрузке культур
-  const [cropsError, setCropsError] = useState(null);
+// >>> ВАЖНО: УСТАНОВИТЕ ВАШ БАЗОВЫЙ URL БЭКЕНДА ЗДЕСЬ! <<<
+// Он должен быть ТОЛЬКО корнем вашего домена/приложения, без '/api' или '/polygons'.
+// Например: 'http://localhost:8080' для локальной разработки, или
+// 'https://newback-production-aa83.up.railway.app' для вашего Railway App.
+const BASE_API_URL = 'http://localhost:8080'; 
 
-  // Состояние для хранения полигона, который в данный момент редактируется (через EditControl)
+export default function PolygonDrawMap({ handleLogout }) {
+  const [polygons, setPolygons] = useState([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [isEditingMode, setIsEditingMode] = useState(false);
+  const [selectedPolygon, setSelectedPolygon] = useState(null);
+  const [crops, setCrops] = useState([]);
+  const [loadingCrops, setLoadingCrops] = useState(false);
+  const [cropsError, setCropsError] = useState(null);
   const [editingPolygon, setEditingPolygon] = useState(null);
-  // Ссылка на FeatureGroup, который используется EditControl для редактируемых слоев
   const editableFGRef = useRef();
 
   // --- Функция для загрузки списка культур из API (Wikipedia) ---
@@ -39,9 +34,9 @@ export default function PolygonDrawMap({ handleLogout }) {
           format: 'json',
           list: 'categorymembers',
           cmtitle: 'Категория:Овощи', // Категория "Овощи" на Русской Википедии
-          cmlimit: '100', // Максимальное количество результатов
-          cmtype: 'page', // Только страницы (не подкатегории, файлы и т.д.)
-          origin: '*', // Для обхода CORS
+          cmlimit: '100',
+          cmtype: 'page',
+          origin: '*',
         })
       );
 
@@ -51,55 +46,50 @@ export default function PolygonDrawMap({ handleLogout }) {
 
       const data = await response.json();
       if (data.query && data.query.categorymembers) {
-        // Извлекаем названия овощей и фильтруем ненужные элементы
         const vegetableNames = data.query.categorymembers
           .map((item) => item.title)
           .filter(
             (title) =>
-              !title.includes(':') &&        // Исключаем системные страницы
-              !title.includes('Категория') && // Исключаем саму категорию
-              !title.includes('Список') &&   // Исключаем страницы-списки
-              !title.includes('Template') && // Исключаем шаблоны
-              title.length < 50              // Ограничиваем длину названия
+              !title.includes(':') &&
+              !title.includes('Категория') &&
+              !title.includes('Список') &&
+              !title.includes('Template') &&
+              title.length < 50
           )
-          .sort(); // Сортируем по алфавиту
+          .sort();
         setCrops(vegetableNames);
       } else {
-        // Если API не вернул данные, используем резервный список
-        const fallbackCrops = ['Томаты', 'Огурцы', 'Морковь', 'Свёкла', 'Лук', 'Чеснок', 'Картофель', 'Капуста', 'Перец', 'Баклажаны', 'Кабачки', 'Тыква', 'Редис', 'Петрушка', 'Укроп', 'Салат', 'Шпинат', 'Брокколи', 'Цветная капуста', 'Брюссельская капуста', 'и не только',];
+        const fallbackCrops = ['Томаты', 'Огурцы', 'Морковь', 'Свёкла', 'Лук', 'Чеснок', 'Картофель', 'Капуста', 'Перец', 'Баклажаны', 'Кабачки', 'Тыква', 'Редис', 'Петрушка', 'Укроп', 'Салат', 'Шпинат', 'Брокколи', 'Цветная капуста', 'Брюссельская капуста'];
         setCrops(fallbackCrops);
       }
     } catch (error) {
       console.error('Ошибка при загрузке культур:', error);
       setCropsError('Не удалось загрузить список культур. Используются резервные данные.');
-      // В случае ошибки также используем резервный список
-      const fallbackCrops = ['Томаты', 'Огурцы', 'Морковь', 'Свёкла', 'Лук', 'Чеснок', 'Картофель', 'Капуста', 'Перец', 'Баклажаны', 'Кабачки', 'Тыква', 'Редис', 'Петрушка', 'Укроп', 'Салат', 'Шпинат', 'Брокколи', 'Цветная капуста', 'Брюссельская капуста',];
+      const fallbackCrops = ['Томаты', 'Огурцы', 'Морковь', 'Свёкла', 'Лук', 'Чеснок', 'Картофель', 'Капуста', 'Перец', 'Баклажаны', 'Кабачки', 'Тыква', 'Редис', 'Петрушка', 'Укроп', 'Салат', 'Шпинат', 'Брокколи', 'Цветная капуста', 'Брюссельская капуста'];
       setCrops(fallbackCrops);
     }
     setLoadingCrops(false);
   };
 
-  // Загружаем список культур при первом рендере компонента
   useEffect(() => {
     fetchCropsFromAPI();
   }, []);
 
   // --- Функция сохранения полигона в БД ---
-  const savePolygonToDatabase = useCallback(async (polygonData) => {
-    const polygonName = prompt('Введите название для полигона (для сохранения в БД):', `Полигон ${polygonData.id}`);
-    if (!polygonName) {
-      console.log('Сохранение отменено: название полигона не введено.');
+  const savePolygonToDatabase = useCallback(async (polygonData, name) => {
+    if (!name) {
+      alert('Ошибка сохранения: название полигона не может быть пустым.');
+      console.error('Ошибка сохранения: название полигона не может быть пустым.');
       return;
     }
 
-    // Создаем GeoJSON объект из координат Leaflet
-    const leafletPolygon = L.polygon(polygonData.coordinates);
-    const geoJson = leafletPolygon.toGeoJSON();
-
-    // Преобразуем GeoJSON объект в строку
+    const geoJsonCoordinates = [polygonData.coordinates.map(coord => [coord[1], coord[0]])];
+    const geoJson = {
+        type: "Polygon",
+        coordinates: geoJsonCoordinates
+    };
     const geoJsonString = JSON.stringify(geoJson);
 
-    // Получаем токен аутентификации (пример: из localStorage)
     const token = localStorage.getItem('token'); 
     if (!token) {
       alert('Ошибка: Токен аутентификации отсутствует. Пожалуйста, войдите в систему.');
@@ -108,33 +98,45 @@ export default function PolygonDrawMap({ handleLogout }) {
     }
 
     try {
-      const response = await fetch('/api/polygons', { // Эндпоинт из вашего бэкенд-контроллера
-        method: 'POST', // Используем POST, как указано в вашем контроллере
+      // Используем полный путь к эндпоинту, объединяя BASE_API_URL и '/api/polygons'
+      const response = await fetch(`${BASE_API_URL}/api/polygons`, { 
+        method: 'POST', 
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` // Передаем токен аутентификации
+          'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({
-          name: polygonName,
-          geoJson: geoJsonString // Передаем GeoJSON как строку
+          name: name,
+          geoJson: geoJsonString 
+          // Если вы хотите сохранять культуру, раскомментируйте ниже,
+          // но сначала добавьте 'crop' в PolygonRequestDto и PolygonArea на бэкенде.
+          // crop: polygonData.crop // Пример: polygonData.crop
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Ошибка сохранения полигона: ${response.status} - ${errorData.message || response.statusText}`);
+        let errorMessage = response.statusText;
+        try {
+          const errorText = await response.text(); // Читаем как текст, а не JSON
+          if (errorText.length > 0) {
+            errorMessage = errorText; // Используем текст ошибки, если он есть
+          }
+        } catch (parseError) {
+          console.warn("Could not parse error response as text:", parseError);
+          errorMessage = `Server responded with status ${response.status} but no readable error message.`;
+        }
+        throw new Error(`Ошибка сохранения полигона: ${response.status} - ${errorMessage}`);
       }
 
-      const result = await response.json();
-      alert(`Полигон "${polygonName}" успешно сохранен в БД!`);
-      console.log('Полигон успешно сохранен:', result);
-      // Если бэкенд возвращает ID, можно обновить локальное состояние полигона,
-      // но так как POST создает новый UUID, просто подтвердим сохранение.
+      // Если ответ 200 OK, но не JSON, просто читаем как текст
+      const resultText = await response.text();
+      alert(`Полигон "${name}" успешно сохранен в БД! Ответ сервера: ${resultText}`);
+      console.log('Полигон успешно сохранен:', resultText);
     } catch (error) {
       alert(`Не удалось сохранить полигон: ${error.message}`);
       console.error('Ошибка при сохранении полигона:', error);
     }
-  }, []); // Пустые зависимости, так как savePolygonToDatabase не зависит от изменяемых состояний
+  }, []);
 
   // --- Коллбэки для управления полигонами ---
 
@@ -142,8 +144,8 @@ export default function PolygonDrawMap({ handleLogout }) {
   const startDrawing = () => {
     console.log('startDrawing: Entering drawing mode');
     setIsDrawing(true);
-    setSelectedPolygon(null); // Сбрасываем выбор полигона при начале рисования
-    setIsEditingMode(false); // Убедимся, что режим редактирования выключен
+    setSelectedPolygon(null);
+    setIsEditingMode(false);
     editableFGRef.current?.clearLayers(); 
   };
 
@@ -157,30 +159,32 @@ export default function PolygonDrawMap({ handleLogout }) {
   const onPolygonComplete = useCallback((coordinates) => {
     console.log('onPolygonComplete: New polygon completed', coordinates);
     const newPolygon = {
-      id: Date.now(), // Уникальный ID для нового полигона
+      id: Date.now(), 
       coordinates: coordinates,
-      color: `hsl(${Math.random() * 360}, 70%, 50%)`, // Случайный цвет для нового полигона
-      crop: null, // Изначально культура не выбрана
+      color: `hsl(${Math.random() * 360}, 70%, 50%)`,
+      crop: null, 
+      name: `Новый полигон ${Date.now()}` // Генерируем имя по умолчанию
     };
-    setPolygons((prev) => [...prev, newPolygon]); // Добавляем новый полигон в список
-    setIsDrawing(false); // Выключаем режим рисования после завершения
+    setPolygons((prev) => [...prev, newPolygon]); 
+    setIsDrawing(false); 
 
-    // Автоматическое сохранение нового полигона в БД
-    savePolygonToDatabase(newPolygon);
+    // Автоматическое сохранение нового полигона в БД с именем по умолчанию
+    savePolygonToDatabase(newPolygon, newPolygon.name);
 
-  }, [savePolygonToDatabase]); // Добавляем savePolygonToDatabase в зависимости
+  }, [savePolygonToDatabase]);
 
   // Удалить полигон по ID
   const deletePolygon = (id) => {
     console.log('deletePolygon: Deleting polygon with ID', id);
     setPolygons((prev) => prev.filter((p) => p.id !== id));
-    setSelectedPolygon(null); // Сбрасываем выбор, если удален выбранный полигон
+    setSelectedPolygon(null); 
     if (editingPolygon && editingPolygon.id === id) {
       console.log('deletePolygon: Deleting currently edited polygon, exiting editing mode.');
       setIsEditingMode(false);
       setEditingPolygon(null);
       editableFGRef.current?.clearLayers();
     }
+    // TODO: Добавить вызов API для удаления полигона из БД
   };
 
   // Очистить все полигоны
@@ -189,38 +193,61 @@ export default function PolygonDrawMap({ handleLogout }) {
     setPolygons([]);
     setSelectedPolygon(null);
     setIsDrawing(false);
-    setIsEditingMode(false); // Сбрасываем режим редактирования
+    setIsEditingMode(false);
     setEditingPolygon(null);
-    editableFGRef.current?.clearLayers(); // Очищаем editable слои
+    editableFGRef.current?.clearLayers();
+    // TODO: Добавить вызов API для удаления всех полигонов из БД (если такой эндпоинт есть)
   };
 
   // Очистить все назначенные культуры со всех полигонов
   const clearAllCrops = () => {
     console.log('clearAllCrops: Clearing all assigned crops.');
     setPolygons((prev) => prev.map((p) => ({ ...p, crop: null })));
+    // TODO: Если культура сохраняется в БД, обновить ее там.
   };
 
   // Обновить культуру для конкретного полигона
   const updatePolygonCrop = (polygonId, crop) => {
     console.log(`updatePolygonCrop: Updating polygon ${polygonId} with crop ${crop}.`);
-    setPolygons((prev) =>
-      prev.map((p) => (p.id === polygonId ? { ...p, crop } : p))
-    );
+    setPolygons((prev) => {
+      const updatedPolys = prev.map((p) => (p.id === polygonId ? { ...p, crop } : p));
+      // Если полигон выбран и мы меняем культуру, можно обновить его имя тоже,
+      // или просто сохранить. Но помните, что это создаст новую запись на бэкенде.
+      const updatedPoly = updatedPolys.find(p => p.id === polygonId);
+      if (updatedPoly) {
+          //savePolygonToDatabase(updatedPoly, updatedPoly.name); // Создаст новую запись!
+      }
+      return updatedPolys;
+    });
   };
+
+  // НОВАЯ ФУНКЦИЯ: Обновление имени полигона
+  const updatePolygonName = useCallback((polygonId, newName) => {
+    setPolygons((prev) => {
+      const updatedPolys = prev.map((p) =>
+        p.id === polygonId ? { ...p, name: newName } : p
+      );
+      const updatedPoly = updatedPolys.find(p => p.id === polygonId);
+      if (updatedPoly) {
+        // ВНИМАНИЕ: Текущий бэкенд не поддерживает обновление.
+        // Этот вызов savePolygonToDatabase создаст НОВУЮ запись в БД с новым именем.
+        // Для обновления необходимо, чтобы ваш бэкенд имел PUT/PATCH эндпоинт.
+        savePolygonToDatabase(updatedPoly, newName); 
+      }
+      return updatedPolys;
+    });
+  }, [savePolygonToDatabase]);
 
   // --- Функции для расчета и форматирования площади ---
   const calculateArea = (coordinates) => {
-    if (coordinates.length < 3) return 0; // Полигон должен иметь минимум 3 точки
-    
-    // Перевод градусов в радианы
+    if (coordinates.length < 3) return 0; 
     const toRadians = (deg) => (deg * Math.PI) / 180;
-    const R = 6371000; // Средний радиус Земли в метрах
-
+    const R = 6371000; 
     let area = 0;
     const n = coordinates.length;
 
     for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n; // Следующая точка (замыкаем круг)
+      const j = (i + 1) % n; 
       const lat1 = toRadians(coordinates[i][0]);
       const lat2 = toRadians(coordinates[j][0]);
       const deltaLon = toRadians(coordinates[j][1] - coordinates[i][1]);
@@ -241,9 +268,9 @@ export default function PolygonDrawMap({ handleLogout }) {
   };
 
   const formatArea = (area) => {
-    if (area < 10000) return `${area.toFixed(1)} м²`; // До 10 000 м² показываем в м²
-    if (area < 1000000) return `${(area / 10000).toFixed(1)} га`; // От 10 000 м² до 1 000 000 м² (1 км²) в гектарах
-    return `${(area / 1000000).toFixed(1)} км²`; // Свыше 1 км² в км²
+    if (area < 10000) return `${area.toFixed(1)} м²`; 
+    if (area < 1000000) return `${(area / 10000).toFixed(1)} га`; 
+    return `${(area / 1000000).toFixed(1)} км²`; 
   };
 
   // --- Логика редактирования полигона с помощью react-leaflet-draw ---
@@ -296,13 +323,11 @@ export default function PolygonDrawMap({ handleLogout }) {
         if (layer.editing && layer.editing.enabled()) {
           console.log('handleStopAndSaveEdit: Disabling editing for active layer.');
           layer.editing.disable();
-          // Принудительное сохранение после отключения редактирования
-          // Важно: на бэкенде это создаст новую запись, так как нет PUT эндпоинта
           if (editingPolygon) {
             const geoJson = layer.toGeoJSON();
             const updatedCoords = geoJson.geometry.coordinates[0].map(coord => [coord[1], coord[0]]);
             const updatedPoly = { ...editingPolygon, coordinates: updatedCoords };
-            savePolygonToDatabase(updatedPoly);
+            savePolygonToDatabase(updatedPoly, updatedPoly.name || `Полигон ${updatedPoly.id}`);
           }
         }
       });
@@ -333,7 +358,7 @@ export default function PolygonDrawMap({ handleLogout }) {
             const updatedPolygon = {
                 ...editingPolygon,
                 coordinates: updatedCoords,
-                geoJson: geoJson,
+                geoJson: geoJson, 
                 updatedAt: new Date().toISOString(),
             };
 
@@ -343,9 +368,7 @@ export default function PolygonDrawMap({ handleLogout }) {
                 return newPolygons;
             });
 
-            // Автоматическое сохранение отредактированного полигона в БД
-            // Важно: на бэкенде это создаст новую запись, так как нет PUT эндпоинта
-            savePolygonToDatabase(updatedPolygon);
+            savePolygonToDatabase(updatedPolygon, updatedPolygon.name || `Полигон ${updatedPolygon.id}`);
         });
     } else {
         console.log('onPolygonEdited: No layers were actually edited or found in the event.');
@@ -360,21 +383,57 @@ export default function PolygonDrawMap({ handleLogout }) {
 
 
   // Функция для отображения "Моих полигонов" (пока заглушка)
-  const showMyPolygons = useCallback(() => {
+  const showMyPolygons = useCallback(async () => {
     alert('Кнопка "Мои полигоны" нажата. Здесь будет логика загрузки и отображения ваших сохраненных полигонов из БД.');
-    // В будущем здесь будет запрос к вашему бэкенду на получение списка полигонов пользователя:
-    // fetch('/api/polygons/my', { headers: { 'Authorization': `Bearer ${token}` } })
-    // ... и затем отображение их в модальном окне или новой секции.
+    
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Ошибка: Токен аутентификации отсутствует. Пожалуйста, войдите в систему.');
+      console.error('Ошибка: Токен аутентификации отсутствует.');
+      return;
+    }
+
+    try {
+        const response = await fetch(`${BASE_API_URL}/api/polygons/my`, { // Используем BASE_API_URL
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            let errorMessage = response.statusText;
+            try {
+              const errorText = await response.text(); // Читаем как текст
+              if (errorText.length > 0) {
+                errorMessage = errorText;
+              }
+            } catch (parseError) {
+              console.warn("Could not parse error response as text:", parseError);
+            }
+            throw new Error(`Ошибка загрузки полигонов: ${response.status} - ${errorMessage}`);
+        }
+
+        const data = await response.json(); // Ожидаем JSON, т.к. список полигонов
+        console.log('Мои полигоны загружены:', data);
+        alert('Мои полигоны загружены (смотрите консоль). В реальном приложении их нужно будет отобразить на карте.');
+        // Здесь вы можете добавить логику для отрисовки полученных полигонов на карте
+        // setPolygons(data.map(item => ({
+        //   id: item.id, // Если бэкенд возвращает ID
+        //   coordinates: JSON.parse(item.geoJson).coordinates[0].map(coord => [coord[1], coord[0]]),
+        //   color: `hsl(${Math.random() * 360}, 70%, 50%)`, // Или цвет из БД, если он там есть
+        //   crop: item.cropName || null, // Если в БД есть поле для культуры
+        //   name: item.name // Имя полигона из БД
+        // })));
+
+    } catch (error) {
+        alert(`Не удалось загрузить мои полигоны: ${error.message}`);
+        console.error('Ошибка при загрузке моих полигонов:', error);
+    }
   }, []);
 
-
-  console.log('PolygonDrawMap rendering. isDrawing:', isDrawing, 'isEditingMode:', isEditingMode);
-
-
   return (
-    // Контейнер для карты и её собственного сайдбара
     <div style={{ display: 'flex', height: '100vh', width: '100%' }}>
-      {/* Компонент карты */}
       <MapComponent
         polygons={polygons}
         onPolygonComplete={onPolygonComplete}
@@ -384,7 +443,6 @@ export default function PolygonDrawMap({ handleLogout }) {
         editableFGRef={editableFGRef}
       />
 
-      {/* Компонент боковой панели карты */}
       <MapSidebar
         polygons={polygons}
         selectedPolygon={selectedPolygon}
@@ -401,17 +459,17 @@ export default function PolygonDrawMap({ handleLogout }) {
         formatArea={formatArea}
         startDrawing={startDrawing}
         stopDrawing={stopDrawing}
-        stopAndSaveDrawing={onPolygonComplete} // Для рисования
-        handleStopAndSaveEdit={handleStopAndSaveEdit} // Для редактирования
+        stopAndSaveDrawing={onPolygonComplete}
+        handleStopAndSaveEdit={handleStopAndSaveEdit}
         isDrawing={isDrawing}
-        isEditingMode={isEditingMode} // Передаем новое состояние
-        clearAll={clearAll} // Передаем функцию очистки всех полигонов
-        handleLogout={handleLogout} // Передаем функцию выхода
-        showMyPolygons={showMyPolygons} // НОВЫЙ ПРОП: Передаем функцию для "Моих полигонов"
+        isEditingMode={isEditingMode}
+        clearAll={clearAll}
+        handleLogout={handleLogout}
+        showMyPolygons={showMyPolygons}
+        updatePolygonName={updatePolygonName}
       />
 
-      {/* Информационный блок о режиме рисования (отображается только когда isDrawing=true) */}
-      {(isDrawing || isEditingMode) && ( // Теперь отображается и в режиме редактирования
+      {(isDrawing || isEditingMode) && (
         <div
           style={{
             position: 'absolute',

@@ -1,7 +1,7 @@
 // components/ForMap/MapSidebar.jsx
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom'; // Импортируем для навигации
-import './MapSidebar.css';
+import { useNavigate, useLocation } from 'react-router-dom';
+import './MapSidebar.css'; // Импортируем новый CSS для MapSidebar
 
 export default function MapSidebar({
   polygons,               // Массив всех полигонов
@@ -24,7 +24,8 @@ export default function MapSidebar({
   isDrawing,              // Текущее состояние режима рисования
   isEditingMode,          // Новое состояние: активен ли режим редактирования
   clearAll,               // Функция для очистки всех полигонов
-  handleLogout            // Функция выхода из системы, переданная из App.js
+  handleLogout,           // Функция выхода из системы, переданная из App.js
+  showMyPolygons          // НОВЫЙ ПРОП: Функция для показа "Моих полигонов"
 }) {
   // Логирование для отслеживания состояния в MapSidebar
   console.log('MapSidebar rendering. isDrawing:', isDrawing, 'isEditingMode:', isEditingMode);
@@ -188,6 +189,19 @@ export default function MapSidebar({
           🗑️ Очистить все полигоны
         </button>
       </div>
+
+      {/* НОВАЯ КНОПКА: Мои полигоны */}
+      <button
+        onClick={showMyPolygons} // Вызов функции showMyPolygons
+        style={{
+          ...buttonStyle,
+          backgroundColor: '#007bff', // Синий цвет
+          color: 'white',
+          marginTop: '15px', // Отступ сверху
+        }}
+      >
+        📂 Мои полигоны
+      </button>
 
       {/* Раздел со списком полигонов */}
       {polygons.length > 0 && (
