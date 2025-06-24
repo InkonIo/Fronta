@@ -11,7 +11,7 @@ import './Map.css';                        // CSS-файл для специфи
 // Он должен быть ТОЛЬКО корнем вашего домена/приложения, без '/api' или '/polygons'.
 // Например: 'http://localhost:8080' для локальной разработки, или
 // 'https://newback-production-aa83.up.railway.app' для вашего Railway App.
-const BASE_API_URL = 'http://localhost:8080'; 
+const BASE_API_URL = 'https://newback-production-aa83.up.railway.app'; 
 
 // --- Вспомогательная функция для безопасного парсинга тела ответа ---
 async function parseResponseBody(response) {
@@ -136,7 +136,7 @@ export default function PolygonDrawMap({ handleLogout }) {
     } catch (error) {
       console.error('Ошибка при загрузке культур:', error);
       setCropsError('Не удалось загрузить список культур. Используются резервные данные.');
-      const fallbackCrops = ['Томаты', 'Огурцы', 'Морковь', 'Свёкла', 'Лук', 'Чеснок', 'Картофель', 'Капуста', 'Перец', 'Баклажаны', 'Кабачки', 'Тыква', 'Редис', 'Петрушка', 'Укроп', 'Салат', 'Шпинат', 'Брокколи', 'Цветная капуста', 'Брюссельская капуста'];
+      const fallbackCrops = ['Томаты', 'Огурцы', 'Морковь', 'Свёкла', 'Лук', 'Чеснок', 'Картофель', 'Капуста', 'Перец', 'Баклажаны', 'Кабачки', 'Тыква', 'Rедис', 'Петрушка', 'Укроп', 'Салат', 'Шпинат', 'Брокколи', 'Цветная капуста', 'Брюссельская капуста'];
       setCrops(fallbackCrops);
       showToast(`Ошибка при загрузке культур: ${error.message}`, 'error');
     } finally {
@@ -461,52 +461,38 @@ export default function PolygonDrawMap({ handleLogout }) {
     setIsSavingPolygon(false);
     setIsFetchingPolygons(false);
 
-    // Clear drawing mode if active
+    // Очищаем режим рисования, если он активен
     if (isDrawing) {
       console.log('[handleEditPolygon] Exiting drawing mode.');
       setIsDrawing(false);
       if (window.clearCurrentPath) window.clearCurrentPath(); // Очищаем незавершенное рисование
     }
-    // Disable previous map editing if active
-    if (isEditingMode && editableFGRef.current) {
-      console.log('[handleEditPolygon] Disabling previous editing layers.');
-      editableFGRef.current.eachLayer(layer => {
-        if (layer.editing && layer.editing.enabled()) {
-          layer.editing.disable();
-        }
-      });
-      editableFGRef.current.clearLayers(); 
+    
+    // Если уже был активен режим редактирования (например, нажали на другой полигон),
+    // очищаем предыдущие слои, которыми управлял EditControl.
+    // Эту логику можно оставить здесь или полностью перенести в MapComponent's useEffect.
+    // Для надежности оставлю очистку здесь перед установкой нового полигона.
+    if (editableFGRef.current) {
+        editableFGRef.current.clearLayers();
     }
 
     const polygonToEdit = polygons.find((p) => p.id === polygonId);
     if (!polygonToEdit) {
-      console.error('[handleEditPolygon] Polygon not found for editing.');
+      console.error('[handleEditPolygon] Polygon for editing not found in state.');
       showToast('Полигон для редактирования не найден.', 'error');
       return;
     }
 
-    if (editableFGRef.current) {
-      // При создании Leaflet Polygon, используем только координаты, свойства добавляются позже
-      const leafletPolygon = L.polygon(polygonToEdit.coordinates);
-      editableFGRef.current.addLayer(leafletPolygon);
-
-      if (leafletPolygon.editing) {
-        console.log('[handleEditPolygon] Enabling Leaflet editing for polygon.');
-        leafletPolygon.editing.enable();
-        setIsEditingMode(true); 
-        setEditingMapPolygon(polygonToEdit); 
-        setSelectedPolygon(polygonToEdit.id); 
-        showToast(`Начато редактирование формы полигона "${polygonToEdit.name || polygonToEdit.id}".`, 'info');
-        console.log('[handleEditPolygon] isEditingMode set to TRUE. isSavingPolygon and isFetchingPolygons set to FALSE.');
-      } else {
-        console.error('[handleEditPolygon] Leaflet polygon editing not available for this layer.');
-        showToast('Ошибка: Инструменты редактирования карты недоступны.', 'error');
-      }
-    } else {
-      console.error('[handleEditPolygon] editableFGRef.current is not available.');
-      showToast('Ошибка: Ссылка на слой редактирования недоступна.', 'error');
-    }
-  }, [polygons, isDrawing, isEditingMode, showToast]);
+    // Устанавливаем состояния, которые вызовут рендеринг MapComponent
+    // и активацию эффекта редактирования в нем
+    setIsEditingMode(true); 
+    setEditingMapPolygon(polygonToEdit); // Передаем полигон для редактирования в MapComponent
+    setSelectedPolygon(polygonToEdit.id); 
+    showToast(`Начато редактирование формы полигона "${polygonToEdit.name || polygonToEdit.id}".`, 'info');
+    console.log('[handleEditPolygon] isEditingMode set to TRUE. isSavingPolygon and isFetchingPolygons set to FALSE.');
+    // Важно: Здесь мы БОЛЬШЕ НЕ добавляем слой в editableFGRef.current напрямую и не вызываем .enable() здесь.
+    // Это будет сделано в useEffect в MapComponent, когда реф будет гарантированно доступен и компонент отрисуется.
+  }, [polygons, isDrawing, showToast]); // isEditingMode убран из зависимостей, т.к. мы его здесь изменяем.
 
   // Функция для программной остановки и сохранения редактирования (как формы, так и карты)
   const handleStopAndSaveEdit = useCallback(() => {
@@ -696,6 +682,7 @@ export default function PolygonDrawMap({ handleLogout }) {
         editableFGRef={editableFGRef}
         selectedPolygon={selectedPolygon} 
         isEditingMode={isEditingMode} 
+        editingMapPolygon={editingMapPolygon} // <-- Передаем полигон для редактирования
       />
 
       <MapSidebar

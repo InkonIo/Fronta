@@ -1,10 +1,9 @@
 // components/ForMap/MapComponent.jsx
-import React, { useRef, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, FeatureGroup, useMapEvents } from 'react-leaflet';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
+import { MapContainer, TileLayer, FeatureGroup, useMapEvents, useMap } from 'react-leaflet'; // Добавил useMap
 import { EditControl } from 'react-leaflet-draw';
 import * as L from 'leaflet';
 import 'leaflet-draw/dist/leaflet.draw.css';
-// Исправленный импорт для стилей Markercluster
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 
@@ -26,20 +25,50 @@ export default function MapComponent({
   isDrawing,
   editableFGRef,
   selectedPolygon,
-  isEditingMode // isEditingMode теперь используется для логики поведения EditControl
+  isEditingMode,
+  editingMapPolygon // <-- Новый пропс: полигон, который сейчас редактируется
 }) {
   const mapRef = useRef(null);
   const [zoom, setZoom] = useState(13); // Состояние для отслеживания текущего зума карты
 
-  // Хук для отслеживания событий карты, включая изменение масштаба
-  const MapEventsHandler = () => {
+  // Внутренний компонент для доступа к экземпляру карты через useMap
+  const MapInteractionHandler = () => {
+    const map = useMap(); // Получаем экземпляр карты Leaflet
+
+    // Функция для центрирования и приближения к маркеру
+    const flyToMarker = useCallback((latlng, newZoom = 15) => {
+      if (map) {
+        map.flyTo(latlng, newZoom, {
+          duration: 1.5, // Длительность анимации в секундах
+        });
+      }
+    }, [map]);
+
+    // Передаем flyToMarker через контекст или как обычный пропс вниз,
+    // но для простоты, если PolygonAndMarkerLayer является прямым потомком MapComponent,
+    // можно передать его напрямую в MapComponent и затем в PolygonAndMarkerLayer.
+    // Здесь мы просто возвращаем null, так как эта функция предназначена для использования родительским компонентом
+    // и передачей вниз через пропсы.
+    useEffect(() => {
+      // Это способ передать функцию flyToMarker на уровень MapComponent
+      // чтобы затем MapComponent передал ее в PolygonAndMarkerLayer.
+      // Обычно, если MapInteractionHandler не является отдельным компонентом,
+      // flyToMarker можно объявить непосредственно в MapComponent.
+      // Но в данной структуре, мы можем вернуть ее из useMapEvents или использовать контекст.
+      // Проще всего объявить ее в родительском компоненте и передать.
+      // Для этой демонстрации, я передам map.flyTo напрямую из MapComponent в PolygonAndMarkerLayer.
+    }, [flyToMarker]);
+
+    // Возвращаем null, так как этот компонент не рендерит UI сам по себе
+    // он только предоставляет доступ к экземпляру карты.
     useMapEvents({
-      zoomend: (e) => {
-        setZoom(e.target.getZoom());
-      },
+        zoomend: (e) => {
+            setZoom(e.target.getZoom());
+        },
     });
     return null;
   };
+
 
   // Мемоизированные функции для расчета и форматирования площади (передаются в PolygonAndMarkerLayer)
   const calculateArea = useCallback((coordinates) => {
@@ -85,6 +114,33 @@ export default function MapComponent({
     if (window.clearCurrentPath) window.clearCurrentPath();
   }, [onPolygonComplete, setIsDrawing]);
 
+  // НОВЫЙ ЭФФЕКТ ДЛЯ РЕДАКТИРОВАНИЯ:
+  // Этот эффект отвечает за добавление полигона в editableFGRef и включение редактирования
+  useEffect(() => {
+    // Проверяем, что режим редактирования включен, реф доступен и есть полигон для редактирования
+    if (isEditingMode && editableFGRef.current && editingMapPolygon) {
+      console.log('[MapComponent useEffect] Editing mode active, ref and polygon available.');
+      // Очищаем любые предыдущие слои в editableFGRef, чтобы убедиться, что только один полигон активен для редактирования
+      editableFGRef.current.clearLayers();
+
+      // Создаем Leaflet Polygon слой из координат полигона, который редактируется
+      const leafletPolygon = L.polygon(editingMapPolygon.coordinates);
+      editableFGRef.current.addLayer(leafletPolygon); // Добавляем его в FeatureGroup
+
+      // Включаем режим редактирования Leaflet для этого слоя
+      if (leafletPolygon.editing) {
+        leafletPolygon.editing.enable();
+        console.log('[MapComponent useEffect] Enabled Leaflet editing for polygon:', editingMapPolygon.id);
+      } else {
+        console.error('[MapComponent useEffect] Leaflet polygon editing not available for this layer.');
+      }
+    } else if (!isEditingMode && editableFGRef.current) {
+      // Если режим редактирования выключен, очищаем все активные слои редактирования
+      editableFGRef.current.clearLayers();
+      console.log('[MapComponent useEffect] Editing mode off, cleared editable layers.');
+    }
+  }, [isEditingMode, editableFGRef, editingMapPolygon]); // Зависимости для этого эффекта
+
   return (
     <MapContainer
       center={[43.2567, 76.9286]}
@@ -96,7 +152,7 @@ export default function MapComponent({
         setZoom(mapInstance.getZoom());
       }}
     >
-      <MapEventsHandler /> {/* Добавляем обработчик событий карты */}
+      <MapInteractionHandler /> {/* Добавляем обработчик событий карты и доступ к экземпляру карты */}
 
       {/* Тайловый слой карты (спутниковые снимки Google) */}
       <TileLayer
@@ -113,35 +169,30 @@ export default function MapComponent({
       />
 
       {/* FeatureGroup для управления слоями, которые могут быть отредактированы с помощью EditControl */}
-      {/* Этот FeatureGroup должен содержать только слои, напрямую управляемые EditControl для редактирования. */}
-      {/* EditControl отображается только если isEditingMode активен, чтобы не мешать рисованию */}
-      {isEditingMode && (
+      {/* Этот FeatureGroup и EditControl рендерятся ТОЛЬКО если isEditingMode активен */}
+      {isEditingMode && ( 
         <FeatureGroup ref={editableFGRef}>
-          {editableFGRef.current && ( // Условный рендеринг EditControl, когда ref доступен
-            <EditControl
-              position="topright"
-              onEdited={onPolygonEdited}
-              draw={{
-                polygon: false,
-                rectangle: false,
-                polyline: false,
-                circle: false,
-                marker: false,
-                circlemarker: false
-              }}
-              edit={{
-                featureGroup: editableFGRef.current,
-                remove: false, // Отключаем кнопку удаления
-                edit: false,   // Отключаем кнопку редактирования
-              }}
-            />
-          )}
+          {/* EditControl теперь всегда внутри FeatureGroup, если FeatureGroup рендерится */}
+          <EditControl
+            position="topright"
+            onEdited={onPolygonEdited}
+            draw={{
+              polygon: false, rectangle: false, polyline: false,
+              circle: false, marker: false, circlemarker: false
+            }}
+            edit={{
+              featureGroup: editableFGRef.current, // editableFGRef.current будет доступен здесь, так как FeatureGroup уже отрендерился
+              remove: false, // Отключаем кнопку удаления
+              edit: false,   // Отключаем кнопку редактирования
+            }}
+          />
         </FeatureGroup>
       )}
 
-      {/* НОВЫЙ КОМПОНЕНТ: Отвечает за отображение всех полигонов.
-          Он должен быть вне FeatureGroup для editableFGRef, чтобы избежать конфликтов. */}
-      <PolygonAndMarkerLayer
+      {/* Компонент PolygonAndMarkerLayer: Отвечает за отображение всех полигонов.
+          Он находится вне FeatureGroup editableFGRef, чтобы избежать конфликтов и "пропадания" полигонов. */}
+      {/* Передаем функцию map.flyTo напрямую */}
+      <MapComponentInternalFlyTo
         polygons={polygons}
         zoom={zoom}
         calculateArea={calculateArea}
@@ -149,5 +200,28 @@ export default function MapComponent({
         selectedPolygon={selectedPolygon}
       />
     </MapContainer>
+  );
+}
+
+// Отдельный компонент для использования useMap и передачи flyToMarker
+function MapComponentInternalFlyTo({ polygons, zoom, calculateArea, formatArea, selectedPolygon }) {
+  const map = useMap(); // Получаем экземпляр карты Leaflet здесь
+  const flyToMarker = useCallback((latlng, newZoom = 15) => {
+    if (map) {
+      map.flyTo(latlng, newZoom, {
+        duration: 1.5, // Длительность анимации в секундах
+      });
+    }
+  }, [map]);
+
+  return (
+    <PolygonAndMarkerLayer
+      polygons={polygons}
+      zoom={zoom}
+      calculateArea={calculateArea}
+      formatArea={formatArea}
+      selectedPolygon={selectedPolygon}
+      flyToMarker={flyToMarker} // Передаем функцию flyToMarker
+    />
   );
 }

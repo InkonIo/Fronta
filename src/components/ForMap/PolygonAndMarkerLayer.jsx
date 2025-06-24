@@ -3,7 +3,7 @@ import React from 'react';
 import { Polygon, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 
-export default function PolygonAndMarkerLayer({ polygons, calculateArea, formatArea, selectedPolygon }) {
+export default function PolygonAndMarkerLayer({ polygons, calculateArea, formatArea, selectedPolygon, flyToMarker }) {
   // Marker icon for the center of polygons
   const polygonCenterIcon = new L.Icon({
     iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png', // Default marker
@@ -22,17 +22,10 @@ export default function PolygonAndMarkerLayer({ polygons, calculateArea, formatA
         // Leaflet polygon options
         const polygonOptions = {
           color: isSelected ? '#ff0000' : polygon.color, // Красный, если выделен
-          fillColor: isSelected ? '#ffaaaa' : polygon.color,
-          fillOpacity: 0.5,
-          weight: isSelected ? 4 : 2, // Толще граница, если выделен
+          fillOpacity: 0, // Установлено 0 для прозрачной заливки
+          weight: isSelected ? 6 : 4, // <-- Толще граница: 6 для выделенного, 4 для остальных
           opacity: 1,
           lineJoin: 'round',
-          // zIndex для Path слоев внутри одной панели.
-          // Если вы хотите, чтобы выделенный полигон был ПОВЕРХ других, 
-          // можете попробовать назначить ему более высокий zIndex.
-          // Но это более надежно, если они находятся в одном "pane".
-          // Если другие слои (например, от react-leaflet-draw) перекрывают, 
-          // возможно, потребуется настройка panefor L.map.
         };
 
         // Calculate centroid for the marker (simple average for now)
@@ -47,7 +40,15 @@ export default function PolygonAndMarkerLayer({ polygons, calculateArea, formatA
           <Polygon key={polygon.id} positions={polygon.coordinates} pathOptions={polygonOptions}>
             {/* Optional marker at polygon center */}
             {center[0] !== 0 || center[1] !== 0 ? (
-              <Marker position={center} icon={polygonCenterIcon}>
+              <Marker 
+                position={center} 
+                icon={polygonCenterIcon}
+                eventHandlers={{
+                  click: () => {
+                    flyToMarker(center, 15); // Приближаем к маркеру с зумом 15
+                  },
+                }}
+              >
                 <Popup>
                   <div>
                     <strong>Название:</strong> {polygon.name || 'Без названия'} <br/>
