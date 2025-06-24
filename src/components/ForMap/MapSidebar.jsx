@@ -38,8 +38,6 @@ const combineCropAndComment = (cropBase, comment) => {
   if (base) {
     return base;
   }
-  // В случае, если есть только комментарий без выбранной культуры, он все равно будет сохранен.
-  // Хотя, вероятно, это нежелательно и можно добавить доп. проверку на фронтенде.
   return comm; 
 };
 
@@ -65,7 +63,7 @@ export default function MapSidebar({
   isEditingMode,          // Новое состояние: активен ли режим редактирования (редактирование формы на карте)
   clearAll,               // Функция для очистки всех полигонов (теперь запускает подтверждение)
   handleLogout,           // Функция выхода из системы, переданная из App.js
-  // showMyPolygons,         // УДАЛЕНО: Больше не нужен отдельный пропс для кнопки "Показать мои полигоны"
+  showMyPolygons,         // Возвращаем showMyPolygons для кнопки "Показать мои полигоны"
   updatePolygonName,      // Функция для обновления имени полигона (инлайн)
   isSavingPolygon,        // Новое состояние: идет ли сохранение полигона
   isFetchingPolygons,     // Новое состояние: идет ли загрузка полигонов
@@ -140,13 +138,12 @@ export default function MapSidebar({
     <div style={sidebarStyle}>
       {/* Кнопка бургер-меню внутри MapSidebar */}
       <button className="burger-menu-icon" onClick={toggleBurgerMenu} aria-label="Открыть/закрыть меню">
-        {isBurgerMenuOpen ? '✕' : '☰'} {/* Меняем иконку */}
+        {isBurgerMenuOpen ? '✕' : '☰'} 
       </button>
 
       {/* Выпадающее меню */}
       {isBurgerMenuOpen && (
-        <div className="map-sidebar-dropdown-menu"> {/* Уникальный класс для этого меню */}
-          {/* Ссылки навигации */}
+        <div className="map-sidebar-dropdown-menu"> 
           <a
             href="#"
             onClick={e => { e.preventDefault(); handleNavigate('/', 'home'); }}
@@ -176,19 +173,15 @@ export default function MapSidebar({
             🌱 Данные почвы
           </a>
           
-          {/* Кнопка "Выйти" в этом меню */}
           <button onClick={handleLogout} className="map-menu-item map-logout">
             🚪 Выйти
           </button>
         </div>
       )}
 
-
-      {/* Остальное содержимое MapSidebar остается без изменений */}
       <h2 style={{ color: '#333', marginBottom: '10px' }}>Управление картой</h2>
       <hr style={{ border: 'none', height: '1px', background: '#ccc', margin: '0' }} />
 
-      {/* Секция кнопок для рисования/удаления */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <button
           onClick={startDrawing}
@@ -202,7 +195,7 @@ export default function MapSidebar({
         </button>
 
         <button
-          onClick={handleStopAndSaveEdit} // Вызываем универсальную функцию
+          onClick={handleStopAndSaveEdit} 
           disabled={!isSaveButtonActive || isSavingPolygon || isFetchingPolygons}
           style={{ ...buttonStyle, 
             backgroundColor: isSaveButtonActive ? '#ff9800' : '#f0f0f0', 
@@ -213,7 +206,7 @@ export default function MapSidebar({
         </button>
 
         <button
-          onClick={clearAll} // Теперь вызывает confirmClearAll из PolygonDrawMap
+          onClick={clearAll} 
           disabled={isSavingPolygon || isFetchingPolygons || polygons.length === 0}
           style={{ ...buttonStyle, 
             backgroundColor: (isSavingPolygon || isFetchingPolygons || polygons.length === 0) ? '#cccccc' : '#f44336', 
@@ -223,24 +216,28 @@ export default function MapSidebar({
           🗑️ Очистить все полигоны
         </button>
         
-        {/* НОВАЯ КНОТКА: Скрыть/Показать список полигонов (объединена) */}
+        {/* Объединенная кнопка Скрыть/Показать список и загрузка с сервера */}
         <button
-          onClick={() => setShowPolygonsList(prev => !prev)}
+          onClick={() => {
+            if (!showPolygonsList) { // Если список скрыт, инициируем загрузку с сервера
+              showMyPolygons(); // Это обновит polygons из API, и список станет виден
+            }
+            setShowPolygonsList(prev => !prev);
+          }}
           disabled={isSavingPolygon || isFetchingPolygons || isDrawing || isEditingMode}
           style={{
             ...buttonStyle,
-            backgroundColor: showPolygonsList ? '#6c757d' : '#007bff', // Серый, если показано; синий, если скрыто
+            backgroundColor: showPolygonsList ? '#6c757d' : '#007bff', 
             color: 'white',
-            marginTop: '15px', // Отступ сверху
+            marginTop: '15px', 
           }}
         >
-          {isFetchingPolygons ? '📂 Загружаю список...' : (showPolygonsList ? '🙈 Скрыть список полигонов' : '👀 Показать список полигонов')}
+          {isFetchingPolygons ? '📂 Загружаю список...' : (showPolygonsList ? '🙈 Скрыть список полигонов' : '👀 Показать и загрузить полигоны')}
         </button>
       </div>
 
       <hr style={{ border: 'none', height: '1px', background: '#ccc', margin: '0' }} />
 
-      {/* Раздел со списком полигонов - теперь условно отображается */}
       {showPolygonsList && polygons.length > 0 && (
         <div style={{ marginTop: '10px' }}>
           <h3 style={{ margin: '0 0 15px 0', color: '#333', fontSize: '18px' }}>
@@ -266,22 +263,20 @@ export default function MapSidebar({
                   {selectedPolygon === polygon.id ? (
                     <input
                       type="text"
-                      value={polygon.name || ''} // Используем пустую строку, если имя null
+                      value={polygon.name || ''} 
                       onChange={(e) => {
                         e.stopPropagation();
-                        // Обновляем локальное состояние немедленно для плавного ввода
                         updatePolygonName(polygon.id, e.target.value); 
                       }}
                       onBlur={(e) => {
                         e.stopPropagation();
-                        // Триггерим сохранение в БД только при потере фокуса
                         const updatedPoly = polygons.find(p => p.id === polygon.id);
-                        if (updatedPoly && updatedPoly.name !== (e.target.value || '').trim()) { // Проверяем, изменилось ли значение
-                           const polyToSave = { ...updatedPoly, name: (e.target.value || '').trim() }; // Обновляем имя, обрезаем пробелы
-                           savePolygonToDatabase(polyToSave, true); // Передаем весь объект
+                        if (updatedPoly && updatedPoly.name !== (e.target.value || '').trim()) { 
+                           const polyToSave = { ...updatedPoly, name: (e.target.value || '').trim() }; 
+                           savePolygonToDatabase(polyToSave, true); 
                         }
                       }}
-                      onClick={(e) => e.stopPropagation()} // Предотвратить выбор полигона при клике на инпут
+                      onClick={(e) => e.stopPropagation()} 
                       style={{
                         padding: '4px',
                         border: '1px solid #ccc',
@@ -289,14 +284,14 @@ export default function MapSidebar({
                         fontSize: '14px',
                         width: '100%',
                         boxSizing: 'border-box',
-                        color: '#000', // Убедимся, что текст черный
-                        backgroundColor: '#f8f8f8' // Светлый фон для контраста
+                        color: '#000', 
+                        backgroundColor: '#f8f8f8' 
                       }}
                       disabled={isSavingPolygon || isFetchingPolygons}
                     />
                   ) : (
                     <strong style={{ color: '#333', fontSize: '14px' }}>
-                      {polygon.name || `Полигон #${idx + 1}`} {/* Отображаем имя */}
+                      {polygon.name || `Полигон #${idx + 1}`} 
                     </strong>
                   )}
 
@@ -359,11 +354,11 @@ export default function MapSidebar({
                           e.stopPropagation();
                           const originalPoly = polygons.find(p => p.id === polygon.id);
                           const newCropBase = e.target.value;
-                          const currentComment = extractCropComment(originalPoly.crop); // Используем оригинальный комментарий для сравнения
+                          const currentComment = extractCropComment(originalPoly.crop); 
                           const newCombinedCrop = combineCropAndComment(newCropBase, currentComment);
                           
                           if (originalPoly && originalPoly.crop !== newCombinedCrop) { 
-                              savePolygonToDatabase({ ...originalPoly, crop: newCombinedCrop }, true); // Передаем весь объект
+                              savePolygonToDatabase({ ...originalPoly, crop: newCombinedCrop }, true); 
                           }
                         }}
                         disabled={isSavingPolygon || isFetchingPolygons}
@@ -406,12 +401,12 @@ export default function MapSidebar({
                         onBlur={(e) => {
                           e.stopPropagation();
                           const originalPoly = polygons.find(p => p.id === polygon.id);
-                          const currentCropBase = extractCropBase(originalPoly.crop); // Используем оригинальную базу для сравнения
+                          const currentCropBase = extractCropBase(originalPoly.crop); 
                           const newComment = e.target.value;
                           const newCombinedCrop = combineCropAndComment(currentCropBase, newComment);
                           
                           if (originalPoly && originalPoly.crop !== newCombinedCrop) { 
-                              savePolygonToDatabase({ ...originalPoly, crop: newCombinedCrop }, true); // Передаем весь объект
+                              savePolygonToDatabase({ ...originalPoly, crop: newCombinedCrop }, true); 
                           }
                         }}
                         disabled={isSavingPolygon || isFetchingPolygons}
@@ -419,19 +414,18 @@ export default function MapSidebar({
                           padding: '4px 8px',
                           border: '1px solid #ced4da',
                           borderRadius: '4px',
-                          backgroundColor: 'white', /* Явный белый фон */
+                          backgroundColor: 'white', 
                           fontSize: '11px',
                           cursor: (isSavingPolygon || isFetchingPolygons) ? 'not-allowed' : 'pointer',
                           width: '100%',
                           boxSizing: 'border-box',
-                          color: '#000', /* Явный черный цвет текста */
-                          opacity: 1 /* Убеждаемся, что непрозрачность полная */
+                          color: '#000', 
+                          opacity: 1 
                         }}
                       />
                     </div>
                   </div>
                 )}
-                {/* Отображение культуры, если она есть и полигон не выбран для редактирования */}
                 {polygon.crop && selectedPolygon !== polygon.id && (
                   <div 
                     style={{ 
@@ -443,7 +437,6 @@ export default function MapSidebar({
                       borderRadius: '4px', 
                       marginTop: '8px', 
                       opacity: 1, 
-                      transition: 'opacity 0.2s ease', 
                       display: 'block' 
                     }}
                   >
@@ -456,8 +449,6 @@ export default function MapSidebar({
         </div>
       )}
 
-      {/* Раздел сводки культур - теперь условное отображение.
-          Появляется, если есть полигоны ИЛИ идет рисование/редактирование */}
       {showCropsSection && (
         <div style={{ 
           backgroundColor: '#fff', 
@@ -513,7 +504,7 @@ export default function MapSidebar({
                   {Object.entries(
                     polygons.filter((p) => p.crop).reduce((acc, p) => {
                       const area = calculateArea(p.coordinates);
-                      const baseCrop = extractCropBase(p.crop); // Используем базовую культуру для группировки
+                      const baseCrop = extractCropBase(p.crop); 
                       if (baseCrop) {
                          acc[baseCrop] = (acc[baseCrop] || 0) + area;
                       }
