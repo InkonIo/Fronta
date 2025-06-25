@@ -14,6 +14,7 @@
   cursor: pointer;
   z-index: 1001; /* Поверх всего в MapSidebar */
   transition: all 0.3s ease;
+  box-sizing: border-box; /* Важно для корректного расчета размеров и отступов */
 }
 
 .burger-menu-icon:hover {

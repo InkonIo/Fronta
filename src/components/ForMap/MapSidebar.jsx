@@ -69,14 +69,16 @@ export default function MapSidebar({
   isFetchingPolygons,     // Новое состояние: идет ли загрузка полигонов
   showCropsSection,       // НОВЫЙ ПРОП: Флаг для условного отображения секции культур
   savePolygonToDatabase,  // НОВЫЙ ПРОП: Передан из PolygonDrawMap для onBlur сохранения
+  baseApiUrl,             // НОВЫЙ ПРОП: Базовый URL API для запросов
+  showToast,              // НОВЫЙ ПРОП: Функция для показа тост-уведомлений
 }) {
   // Логирование для отслеживания состояния в MapSidebar
   console.log('MapSidebar render. isDrawing:', isDrawing, 'isEditingMode:', isEditingMode, 'isSavingPolygon:', isSavingPolygon, 'isFetchingPolygons:', isFetchingPolygons);
 
-  // Состояние для управления выпадающим меню (бургер-меню)
-  const [isBurgerMenuOpen, setIsBurgerMenuOpen] = useState(false);
+  const [isBurgerMenuOpen, setIsBurgerMenuOpen] = useState(false); // Состояние для управления выпадающим меню (бургер-меню)
   const [activeSection, setActiveSection] = useState('map'); // Активная секция внутри этого меню
-  const [showPolygonsList, setShowPolygonsList] = useState(true); // Новое состояние для скрытия/отображения списка полигонов
+  const [showPolygonsList, setShowPolygonsList] = useState(true); // Состояние для скрытия/отображения списка полигонов
+  const [isFetchingNDVI, setIsFetchingNDVI] = useState(false); // Состояние: идет ли запрос NDVI
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -102,6 +104,7 @@ export default function MapSidebar({
     setIsBurgerMenuOpen(prev => !prev);
   };
 
+
   // Стили для основной боковой панели MapSidebar
   const sidebarStyle = {
     width: '30%',
@@ -115,7 +118,7 @@ export default function MapSidebar({
     display: 'flex',
     flexDirection: 'column',
     gap: '20px', // Отступ между секциями
-    position: 'relative', // Важно для позиционирования выпадающего меню
+    position: 'relative', // Важно для позиционирования выпадающего меню (для бургер-меню)
   };
 
   // Базовые стили для кнопок управления
@@ -133,6 +136,53 @@ export default function MapSidebar({
 
   // Определяем, должна ли кнопка "Остановить и сохранить" быть активной
   const isSaveButtonActive = isDrawing || isEditingMode;
+
+
+  // НОВАЯ ФУНКЦИЯ: Запрос NDVI для выбранного полигона
+  const fetchNdvIForSelectedPolygon = async () => {
+    if (!selectedPolygon) {
+      showToast('Пожалуйста, выберите полигон, чтобы получить NDVI.', 'info');
+      return;
+    }
+    // Отключаем кнопку, если выбран временный полигон
+    if (String(selectedPolygon).startsWith('temp-')) {
+        showToast('Пожалуйста, сохраните полигон, прежде чем запрашивать NDVI (он имеет временный ID).', 'warning');
+        return;
+    }
+
+    setIsFetchingNDVI(true);
+    const token = localStorage.getItem('token'); 
+
+    if (!token) {
+      showToast('Ошибка: Токен аутентификации отсутствует. Пожалуйста, войдите в систему.', 'error');
+      setIsFetchingNDVI(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${baseApiUrl}/api/v1/indices/ndvi/${selectedPolygon}`, { // Использование baseApiUrl
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}` 
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Не удалось получить NDVI.');
+      }
+
+      showToast(`NDVI для полигона "${polygons.find(p => p.id === selectedPolygon)?.name || selectedPolygon}": \n${data.interpretation}`, 'success');
+
+    } catch (error) {
+      console.error('Ошибка при получении NDVI:', error);
+      showToast(`Ошибка при получении NDVI: ${error.message}`, 'error');
+    } finally {
+      setIsFetchingNDVI(false);
+    }
+  };
+
 
   return (
     <div style={sidebarStyle}>
@@ -219,8 +269,9 @@ export default function MapSidebar({
         {/* Объединенная кнопка Скрыть/Показать список и загрузка с сервера */}
         <button
           onClick={() => {
-            if (!showPolygonsList) { // Если список скрыт, инициируем загрузку с сервера
-              showMyPolygons(); // Это обновит polygons из API, и список станет виден
+            // Если список скрыт, инициируем загрузку с сервера, прежде чем показать
+            if (!showPolygonsList) { 
+              showMyPolygons(); 
             }
             setShowPolygonsList(prev => !prev);
           }}
@@ -234,6 +285,29 @@ export default function MapSidebar({
         >
           {isFetchingPolygons ? '📂 Загружаю список...' : (showPolygonsList ? '🙈 Скрыть список полигонов' : '👀 Показать и загрузить полигоны')}
         </button>
+
+        {/* Кнопка: Получить NDVI */}
+        <button
+          onClick={fetchNdvIForSelectedPolygon}
+          disabled={
+            !selectedPolygon || 
+            isFetchingNDVI || 
+            isSavingPolygon || 
+            isFetchingPolygons || 
+            isDrawing || 
+            isEditingMode ||
+            String(selectedPolygon).startsWith('temp-') // Отключаем для временных ID
+          }
+          style={{
+            ...buttonStyle,
+            backgroundColor: (!selectedPolygon || isFetchingNDVI || isSavingPolygon || isFetchingPolygons || isDrawing || isEditingMode || String(selectedPolygon).startsWith('temp-')) ? '#cccccc' : '#8BC34A', // Greenish color
+            color: 'white',
+            marginTop: '15px',
+          }}
+        >
+          {isFetchingNDVI ? '📊 Получаю NDVI...' : '📊 Получить NDVI'}
+        </button>
+
       </div>
 
       <hr style={{ border: 'none', height: '1px', background: '#ccc', margin: '0' }} />

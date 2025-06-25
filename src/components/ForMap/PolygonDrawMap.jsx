@@ -11,7 +11,7 @@ import './Map.css';                        // CSS-файл для специфи
 // Он должен быть ТОЛЬКО корнем вашего домена/приложения, без '/api' или '/polygons'.
 // Например: 'http://localhost:8080' для локальной разработки, или
 // 'https://newback-production-aa83.up.railway.app' для вашего Railway App.
-const BASE_API_URL = 'https://newback-production-aa83.up.railway.app'; 
+const BASE_API_URL = 'http://localhost:8080'; 
 
 // --- Вспомогательная функция для безопасного парсинга тела ответа ---
 async function parseResponseBody(response) {
@@ -136,7 +136,7 @@ export default function PolygonDrawMap({ handleLogout }) {
     } catch (error) {
       console.error('Ошибка при загрузке культур:', error);
       setCropsError('Не удалось загрузить список культур. Используются резервные данные.');
-      const fallbackCrops = ['Томаты', 'Огурцы', 'Морковь', 'Свёкла', 'Лук', 'Чеснок', 'Картофель', 'Капуста', 'Перец', 'Баклажаны', 'Кабачки', 'Тыква', 'Rедис', 'Петрушка', 'Укроп', 'Салат', 'Шпинат', 'Брокколи', 'Цветная капуста', 'Брюссельская капуста'];
+      const fallbackCrops = ['Томаты', 'Огурцы', 'Морковь', 'Свёкла', 'Лук', 'Чеснок', 'Картофель', 'Капуста', 'Перец', 'Баклажаны', 'Кабачки', 'Тыква', 'Редис', 'Петрушка', 'Укроп', 'Салат', 'Шпинат', 'Брокколи', 'Цветная капуста', 'Брюссельская капуста'];
       setCrops(fallbackCrops);
       showToast(`Ошибка при загрузке культур: ${error.message}`, 'error');
     } finally {
@@ -158,20 +158,19 @@ export default function PolygonDrawMap({ handleLogout }) {
       return;
     }
 
+    // Создаем объект GeoJSON Geometry
     const geoJsonGeometry = {
         type: "Polygon",
         coordinates: [coordinates.map(coord => [coord[1], coord[0]])] // Leaflet [lat, lng] to GeoJSON [lng, lat]
     };
-
-    const geoJsonWithProperties = {
-        type: "Feature", 
-        geometry: geoJsonGeometry,
-        properties: {
-            name: name,
-            crop: crop || null 
-        }
+    
+    // В payload теперь name, crop и geoJson будут отдельными полями.
+    // geoJson будет содержать ТОЛЬКО строку GeoJSON Geometry.
+    const payload = { 
+      name: name.trim(), 
+      crop: crop || null, 
+      geoJson: JSON.stringify(geoJsonGeometry) // <-- Отправляем СТРОКУ GeoJSON Geometry
     };
-    const geoJsonString = JSON.stringify(geoJsonWithProperties);
 
     const token = localStorage.getItem('token'); 
     if (!token) {
@@ -191,10 +190,7 @@ export default function PolygonDrawMap({ handleLogout }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ 
-          id: isUpdate ? id : undefined, 
-          geoJson: geoJsonString
-        }),
+        body: JSON.stringify(payload), // JSON.stringify преобразует весь payload
       });
 
       const responseBody = await parseResponseBody(response); 
@@ -214,10 +210,11 @@ export default function PolygonDrawMap({ handleLogout }) {
       console.log(`Полигон успешно ${isUpdate ? 'обновлен' : 'сохранен'} на сервере:`, responseBody);
 
       if (!isUpdate) { 
+        // ID от сервера должен быть в responseBody, если бэкенд его возвращает
         const actualPolygonId = (typeof responseBody === 'object' && responseBody !== null && responseBody.id) 
                                 ? responseBody.id 
-                                : (typeof responseBody === 'string' ? responseBody : id); 
-        
+                                : (typeof responseBody === 'string' ? responseBody : id); // Fallback если responseBody - это просто ID строка
+
         // Обновляем локальное состояние с реальным ID от сервера.
         // Это вызовет эффект сохранения в localStorage.
         setPolygons(prev => prev.map(p => p.id === id ? { ...p, id: String(actualPolygonId) } : p));
@@ -274,9 +271,18 @@ export default function PolygonDrawMap({ handleLogout }) {
   // Коллбэк, вызываемый DrawingHandler при завершении рисования (двойной клик)
   const onPolygonComplete = useCallback((coordinates) => {
     console.log('onPolygonComplete: New polygon completed', coordinates);
+    let finalCoordinates = [...coordinates];
+    // Проверяем, замкнут ли контур. Если нет, добавляем первую точку в конец.
+    if (finalCoordinates.length > 0 && 
+        (finalCoordinates[0][0] !== finalCoordinates[finalCoordinates.length - 1][0] ||
+         finalCoordinates[0][1] !== finalCoordinates[finalCoordinates.length - 1][1])) {
+      finalCoordinates.push(finalCoordinates[0]);
+      console.log('onPolygonComplete: Polygon ring closed by adding first point to end.');
+    }
+
     const newPolygon = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, // Временный ID
-      coordinates: coordinates,
+      coordinates: finalCoordinates, // Используем замкнутые координаты
       color: `hsl(${Math.random() * 360}, 70%, 50%)`, 
       crop: null, 
       name: `Новый полигон ${new Date().toLocaleString()}` 
@@ -593,18 +599,26 @@ export default function PolygonDrawMap({ handleLogout }) {
         if (data && Array.isArray(data)) {
           const loadedPolygons = data.map(item => {
             let coordinates = [];
-            let name = `Загруженный полигон ${item.id || String(Date.now())}`;
-            let crop = null;
+            let name = item.name || `Загруженный полигон ${item.id || String(Date.now())}`; 
+            let crop = item.crop || null; 
+
             try {
-              const geoJsonObj = JSON.parse(item.geoJson);
-              if (geoJsonObj && geoJsonObj.geometry && geoJsonObj.geometry.type === "Polygon" && geoJsonObj.geometry.coordinates && geoJsonObj.geometry.coordinates[0]) {
-                coordinates = geoJsonObj.geometry.coordinates[0].map(coord => [coord[1], coord[0]]); // [lng, lat] to [lat, lng]
-                if (geoJsonObj.properties) {
-                  if (geoJsonObj.properties.name) name = geoJsonObj.properties.name;
-                  if (geoJsonObj.properties.crop) crop = geoJsonObj.properties.crop;
-                }
+              // ИЗМЕНЕНО: теперь item.geoJson должен содержать только GeoJSON Geometry.
+              // Однако, если он все еще приходит как Feature, нам нужно извлечь геометрию.
+              // В идеале, бэкенд должен возвращать только Geometry в поле geoJson.
+              // Эта логика будет работать, если бэкенд отправляет Feature ИЛИ Geometry.
+              const parsedGeoJson = JSON.parse(item.geoJson); 
+              let geometryData = parsedGeoJson;
+
+              // Если это полный Feature, извлекаем только геометрию
+              if (parsedGeoJson.type === "Feature" && parsedGeoJson.geometry) {
+                geometryData = parsedGeoJson.geometry;
+              }
+
+              if (geometryData && geometryData.type === "Polygon" && geometryData.coordinates && geometryData.coordinates[0]) {
+                coordinates = geometryData.coordinates[0].map(coord => [coord[1], coord[0]]); // [lng, lat] to [lat, lng]
               } else {
-                console.warn('Invalid GeoJSON Feature or Geometry structure for item:', item);
+                console.warn('Invalid GeoJSON Geometry structure for item:', item);
               }
             } catch (e) {
               console.error('Failed to parse geoJson for item:', item, e);
@@ -712,6 +726,8 @@ export default function PolygonDrawMap({ handleLogout }) {
         isFetchingPolygons={isFetchingPolygons} 
         showCropsSection={(polygons && polygons.length > 0) || isDrawing || isEditingMode || selectedPolygon} 
         savePolygonToDatabase={savePolygonToDatabase} 
+        baseApiUrl={BASE_API_URL} // Передаем BASE_API_URL как пропс
+        showToast={showToast}    // Передаем showToast как пропс для использования в MapSidebar
       />
 
       {(isDrawing || isEditingMode) && (
@@ -776,4 +792,3 @@ export default function PolygonDrawMap({ handleLogout }) {
     </div>
   );
 }
-
