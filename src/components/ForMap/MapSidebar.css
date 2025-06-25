@@ -4,7 +4,7 @@
 .burger-menu-icon {
   position: absolute; /* Абсолютное позиционирование внутри MapSidebar */
   top: 15px;
-  right: 15px; /* Размещаем справа, чтобы не мешал контенту слева */
+  right: 15px; 
   font-size: 24px;
   color: #343a40; /* Темный цвет для видимости на светлом фоне MapSidebar */
   background-color: white; /* Фон кнопки */

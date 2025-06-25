@@ -770,9 +770,10 @@ export default function PolygonDrawMap({ handleLogout }) {
           message="Вы уверены, что хотите удалить ВСЕ полигоны? Это действие необратимо." 
           onConfirm={handleClearAllConfirmed} 
           onCancel={cancelClearAll} 
-          isProcessing={isSavingPolygon} // Используем isSavingPolygon как индикатор процесса 
+          isProcessing={isSavingPolygon}
         /> 
       )}
     </div>
   );
 }
+
