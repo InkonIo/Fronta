@@ -1,6 +1,8 @@
 // components/ForMap/PolygonDrawMap.jsx
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import MapComponent from './MapComponent'; // Импортируем компонент карты
+// import { db } from '../../firebase'; // ЗАКОММЕНТИРОВАНО согласно вашему запросу
+// import { doc, setDoc, deleteDoc, collection, query, where, getDocs, onSnapshot, runTransaction } from 'firebase/firestore'; // ЗАКОММЕНТИРОВАНО
 import MapSidebar from './MapSidebar';     // Импортируем компонент боковой панели
 import ToastNotification from './ToastNotification'; // Импортируем новый компонент тоста
 import ConfirmDialog from './ConfirmDialog'; // Новый компонент диалога подтверждения
@@ -47,11 +49,21 @@ export default function PolygonDrawMap({ handleLogout }) {
   // Состояние для диалога подтверждения очистки
   const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
 
-  // Состояние для слоя Sentinel Hub (по умолчанию True Color)
-  const [sentinelLayerId, setSentinelLayerId] = useState('1_TRUE_COLOR');
+  // СОСТОЯНИЯ ДЛЯ ИНФО-БЛОКА И SENTINEL HUB (перемещены сюда, как и обсуждалось)
+  const [infoBoxVisible, setInfoBoxVisible] = useState(false); // Изначально не видим
+  const [infoBoxLat, setInfoBoxLat] = useState(null);
+  const [infoBoxLng, setInfoBoxLng] = useState(null);
+  const [infoBoxNdvi, setInfoBoxNdvi] = useState('Загрузка...');
+  const [infoBoxLoading, setInfoBoxLoading] = useState(false);
+  const [sentinelLayerId, setSentinelLayerId] = useState('3_NDVI'); // По умолчанию NDVI
 
+  // Опции для Sentinel Hub слоя (передаем в MapComponent, который будет их рендерить)
+  // В этом компоненте они не используются напрямую, только для передачи.
+  // Но для корректности MapComponent, этот массив пропсов должен быть передан.
 
-  // Функция для отображения тост-уведомлений
+  // const auth = getAuth(); // ЗАКОММЕНТИРОВАНО
+  // const userId = auth.currentUser?.uid || 'anonymous'; // ЗАКОММЕНТИРОВАНО
+
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type, visible: true });
     const timer = setTimeout(() => {
@@ -692,9 +704,21 @@ export default function PolygonDrawMap({ handleLogout }) {
         isEditingMode={isEditingMode}
         editingMapPolygon={editingMapPolygon}
         sentinelLayerId={sentinelLayerId}
+        setSentinelLayerId={setSentinelLayerId} // Передаем сеттер
         baseApiUrl={BASE_API_URL}
         calculateArea={calculateArea} // Передаем calculateArea
         formatArea={formatArea}     // Передаем formatArea
+        // Передаем состояния и сеттеры для инфо-блока в MapComponent
+        infoBoxVisible={infoBoxVisible}
+        setInfoBoxVisible={setInfoBoxVisible}
+        infoBoxLat={infoBoxLat}
+        setInfoBoxLat={setInfoBoxLat}
+        infoBoxLng={infoBoxLng}
+        setInfoBoxLng={setInfoBoxLng}
+        infoBoxNdvi={infoBoxNdvi}
+        setInfoBoxNdvi={setInfoBoxNdvi}
+        infoBoxLoading={infoBoxLoading}
+        setInfoBoxLoading={setInfoBoxLoading}
       />
 
       <MapSidebar

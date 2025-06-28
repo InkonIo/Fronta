@@ -1,6 +1,5 @@
 // components/ForMap/MapComponent.jsx
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import ReactDOM from 'react-dom/client';
 import { MapContainer, TileLayer, FeatureGroup, Polygon, useMapEvents, useMap } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import * as L from 'leaflet';
@@ -30,11 +29,22 @@ export default function MapComponent({
   selectedPolygon,
   isEditingMode,
   editingMapPolygon,
-  sentinelLayerId,
-  setSentinelLayerId,
   baseApiUrl,
   calculateArea,
-  formatArea
+  formatArea,
+  // Пропсы для управления инфо-блоком из родительского PolygonDrawMap
+  infoBoxVisible,
+  setInfoBoxVisible,
+  infoBoxLat,
+  setInfoBoxLat,
+  infoBoxLng,
+  setInfoBoxLng,
+  infoBoxNdvi,
+  setInfoBoxNdvi,
+  infoBoxLoading,
+  setInfoBoxLoading,
+  sentinelLayerId,
+  setSentinelLayerId,
 }) {
   const mapRef = useRef();
   const [sentinelLayer, setSentinelLayer] = useState(null);
@@ -42,12 +52,12 @@ export default function MapComponent({
   const [currentPath, setCurrentPath] = useState([]);
   const [hoveredPoint, setHoveredPoint] = useState(null);
 
-  // Для отладки делаем true по умолчанию, чтобы блок всегда был виден
-  const [infoBoxVisible, setInfoBoxVisible] = useState(true);
-  const [infoBoxLat, setInfoBoxLat] = useState(null);
-  const [infoBoxLng, setInfoBoxLng] = useState(null);
-  const [infoBoxNdvi, setInfoBoxNdvi] = useState('Загрузка...');
-  const [infoBoxLoading, setInfoBoxLoading] = useState(false);
+  // Опции для Sentinel Hub слоя (нужны здесь для рендера в JSX)
+  const sentinelLayerOptions = useMemo(() => ([
+    { id: '1_TRUE_COLOR', name: 'True Color (Естественные цвета)' },
+    { id: '2_FALSE_COLOR', name: 'False Color (Ложные цвета)' },
+    { id: '3_NDVI', name: 'NDVI (Индекс растительности)' },
+  ]), []);
 
   useEffect(() => {
     window.clearCurrentPath = () => {
@@ -66,12 +76,7 @@ export default function MapComponent({
     setCurrentPath,
     setHoveredPoint,
     onPolygonComplete,
-    setInfoBoxLat,
-    setInfoBoxLng,
-    setInfoBoxVisible,
     baseApiUrl,
-    setInfoBoxLoading,
-    setInfoBoxNdvi,
     polygons,
     editableFGRef,
     selectedPolygon,
@@ -80,7 +85,13 @@ export default function MapComponent({
     onEdited,
     onDeleted,
     calculateArea,
-    formatArea
+    formatArea,
+    // Пропсы для обновления родительских состояний
+    setInfoBoxVisible,
+    setInfoBoxLat,
+    setInfoBoxLng,
+    setInfoBoxNdvi,
+    setInfoBoxLoading,
   }) => {
     const map = useMap();
     const editControlRefInternal = useRef();
@@ -107,7 +118,7 @@ export default function MapComponent({
         const { lat, lng } = e.latlng;
         setInfoBoxLat(lat.toFixed(5));
         setInfoBoxLng(lng.toFixed(5));
-        // setInfoBoxVisible(true); // Теперь infoBoxVisible всегда true для отладки
+        setInfoBoxVisible(true); // Устанавливаем видимость через пропс
 
         if (isDrawing && currentPath.length > 0) {
           setHoveredPoint([lat, lng]);
@@ -142,12 +153,12 @@ export default function MapComponent({
             setInfoBoxLoading(false);
           }
         }, 300);
-      }, [isDrawing, currentPath, baseApiUrl, setInfoBoxNdvi]),
+      }, [isDrawing, currentPath, baseApiUrl, setInfoBoxNdvi, setInfoBoxLat, setInfoBoxLng, setInfoBoxLoading, setInfoBoxVisible]),
       mouseout: useCallback(() => {
-        // setInfoBoxVisible(false); // Теперь infoBoxVisible всегда true для отладки
+        setInfoBoxVisible(false); // Устанавливаем видимость через пропс
         setHoveredPoint(null);
         if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
-      }, []),
+      }, [setInfoBoxVisible]),
     });
 
     const displayDrawingPath = hoveredPoint && currentPath.length >= 1
@@ -223,12 +234,6 @@ export default function MapComponent({
   const onEdited = useCallback((e) => {}, []);
   const onDeleted = useCallback((e) => {}, []);
 
-  const sentinelLayerOptions = [
-    { id: '1_TRUE_COLOR', name: 'True Color (Естественные цвета)' },
-    { id: '2_FALSE_COLOR', name: 'False Color (Ложные цвета)' },
-    { id: '3_NDVI', name: 'NDVI (Индекс растительности)' },
-  ];
-
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !SENTINEL_HUB_INSTANCE_ID) return;
@@ -253,115 +258,6 @@ export default function MapComponent({
       }
     };
   }, [sentinelLayerId, SENTINEL_HUB_INSTANCE_ID]);
-
-  // --- Новый компонент пользовательского элемента управления Leaflet ---
-  const InfoAndSentinelControl = useMemo(() => {
-    return L.Control.extend({
-      onAdd: function(map) {
-        // Создаем div элемент для контрола
-        this._div = L.DomUtil.create('div', 'debug-info-block'); // Добавляем класс для отладки
-        
-        // Применяем FIXED позиционирование непосредственно к этому div
-        // Это обертка для вашего React-компонента
-        Object.assign(this._div.style, {
-            position: 'fixed', // Фиксированное позиционирование относительно окна просмотра
-            bottom: '16px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: '9999999', // Очень высокий z-index, чтобы быть ПОВЕРХ ВСЕГО
-            pointerEvents: 'auto', // Позволяем взаимодействовать с элементами
-            display: 'flex', // Для flexbox внутри
-            flexDirection: 'column', // Элементы друг под другом
-            alignItems: 'center', // Центрирование содержимого
-
-            // --- DEBUG СТИЛИ ---
-            width: '250px', // Задаем фиксированную ширину
-            height: '180px', // Задаем фиксированную высоту
-            border: '5px solid red', // Яркая красная рамка
-            backgroundColor: 'yellow', // Ярко-желтый фон
-            padding: '20px', // Увеличенный отступ
-            boxSizing: 'border-box', // Учитываем padding и border в width/height
-            // --- КОНЕЦ DEBUG СТИЛЕЙ ---
-        });
-
-        this._root = ReactDOM.createRoot(this._div);
-        this.update();
-
-        L.DomEvent.disableClickPropagation(this._div);
-        L.DomEvent.disableScrollPropagation(this._div);
-        
-        return this._div;
-      },
-      onRemove: function(map) {
-        if (this._root) {
-          this._root.unmount();
-        }
-      },
-      update: function() {
-        if (this._root) {
-          this._root.render(
-            // Здесь ваш React-компонент, без инлайн-стилей позиционирования,
-            // так как они теперь на родительском div._div
-            <div className="flex flex-col items-center space-y-3
-                            bg-white/10 rounded-2xl shadow-2xl p-4 backdrop-blur-lg border border-white/20">
-              {infoBoxVisible && (
-                <div
-                  className="text-white rounded-xl p-3 flex flex-col items-center justify-center space-y-1 w-full"
-                  style={{ pointerEvents: 'none' }}
-                >
-                  <p className="text-base font-medium">
-                    Шир: <span className="font-semibold">{infoBoxLat}</span>, Дол: <span className="font-semibold">{infoBoxLng}</span>
-                  </p>
-                  <p className="text-base font-medium">NDVI:
-                    {infoBoxLoading ? (
-                      <span className="loader-spin ml-2 h-4 w-4 border-2 border-t-2 border-blue-500 rounded-full inline-block"></span>
-                    ) : (
-                      <span className="font-semibold ml-2">{infoBoxNdvi}</span>
-                    )}
-                  </p>
-                </div>
-              )}
-
-              <div className="text-white rounded-xl p-3 flex flex-col items-start w-full">
-                <label htmlFor="sentinel-layer-select-control" className="text-sm font-medium mb-2 w-full text-center" >Выбрать слой Sentinel:</label>
-                <select
-                  id="sentinel-layer-select-control"
-                  value={sentinelLayerId}
-                  onChange={(e) => setSentinelLayerId(e.target.value)}
-                  className="bg-white/20 text-white rounded-lg text-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-300 border border-white/30 w-full hover:bg-white/30 transition-colors duration-200"
-                >
-                  {sentinelLayerOptions.map(option => (
-                    <option key={option.id} value={option.id} className="bg-gray-800 text-white">
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          );
-        }
-      }
-    });
-  }, [infoBoxVisible, infoBoxLat, infoBoxLng, infoBoxNdvi, infoBoxLoading, sentinelLayerId, setSentinelLayerId, sentinelLayerOptions]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    if (!map.__customInfoControl) {
-      map.__customInfoControl = new InfoAndSentinelControl({ position: 'bottomleft' }); 
-      map.addControl(map.__customInfoControl);
-    }
-    
-    map.__customInfoControl.update();
-
-    return () => {
-      if (map.__customInfoControl && map.hasControl(map.__customInfoControl)) {
-          map.removeControl(map.__customInfoControl);
-          delete map.__customInfoControl;
-      }
-    };
-  }, [InfoAndSentinelControl, infoBoxVisible, infoBoxLat, infoBoxLng, infoBoxNdvi, infoBoxLoading, sentinelLayerId]);
 
 
   return (
@@ -398,6 +294,65 @@ export default function MapComponent({
         calculateArea={calculateArea}
         formatArea={formatArea}
       />
+
+      {/* Инфо-блок теперь рендерится внутри MapComponent, но позиционируется фиксировано */}
+      {infoBoxVisible && (
+        <div style={{
+            position: 'fixed', // Фиксированное позиционирование относительно окна просмотра
+            bottom: '16px',    // Отступ от низа
+            left: '50%',       // По центру по горизонтали
+            transform: 'translateX(-50%)', // Корректировка для точного центрирования
+            zIndex: '9999999', // Очень высокий z-index, поверх всего
+            pointerEvents: 'auto', // Позволяем взаимодействовать с элементами
+            display: 'flex',   // Flexbox
+            flexDirection: 'column', // Элементы друг под другом
+            alignItems: 'center', // Центрирование содержимого
+            // Отладочные стили можно временно включить для проверки
+            // border: '5px solid red', 
+            // backgroundColor: 'yellow',
+            // width: '250px',
+            // height: '180px',
+            // boxSizing: 'border-box',
+        }}>
+          <div
+              className="flex flex-col items-center space-y-3
+                          bg-white/10 rounded-2xl shadow-2xl p-4 backdrop-blur-lg border border-white/20"
+          >
+              <div
+                  className="text-white rounded-xl p-3 flex flex-col items-center justify-center space-y-1 w-full"
+                  style={{ pointerEvents: 'none' }}
+              >
+                  <p className="text-base font-medium">
+                      Шир: <span className="font-semibold">{infoBoxLat}</span>, Дол: <span className="font-semibold">{infoBoxLng}</span>
+                  </p>
+                  <p className="text-base font-medium">NDVI:
+                      {infoBoxLoading ? (
+                          <span className="loader-spin ml-2 h-4 w-4 border-2 border-t-2 border-blue-500 rounded-full inline-block"></span>
+                      ) : (
+                          <span className="font-semibold ml-2">{infoBoxNdvi}</span>
+                      )}
+                  </p>
+              </div>
+
+              {/* Секция выбора слоев Sentinel Hub */}
+              <div className="text-white rounded-xl p-3 flex flex-col items-start w-full">
+                  <label htmlFor="sentinel-layer-select-control" className="text-sm font-medium mb-2 w-full text-center" >Выбрать слой Sentinel:</label>
+                  <select
+                      id="sentinel-layer-select-control"
+                      value={sentinelLayerId}
+                      onChange={(e) => setSentinelLayerId(e.target.value)}
+                      className="bg-white/20 text-white rounded-lg text-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-300 border border-white/30 w-full hover:bg-white/30 transition-colors duration-200"
+                  >
+                      {sentinelLayerOptions.map(option => (
+                          <option key={option.id} value={option.id} className="bg-gray-800 text-white">
+                              {option.name}
+                          </option>
+                      ))}
+                  </select>
+              </div>
+          </div>
+        </div>
+      )}
     </MapContainer>
   );
 }

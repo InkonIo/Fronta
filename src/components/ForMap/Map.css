@@ -21,7 +21,7 @@
   color: white; /* Цвет текста для активных кнопочек */
 }
 
-/* Стили для информационного блока при рисовании */
+/* Стили для информационного блока при рисовании (если он рендерится как часть MapComponent, но позиционируется fixed, эти правила не используются) */
 .drawing-info-box {
   position: absolute;
   bottom: 15px;
@@ -56,5 +56,4 @@
   animation: spin 1s linear infinite;
 }
 
-/* Удалены все предыдущие специфические стили для .leaflet-control-container, .leaflet-bottom, .leaflet-left, .leaflet-control-bottom-center
-   Позиционирование теперь полностью управляется инлайн-стилями на div, созданном Leaflet Control. */
+/* Все остальные специфические стили для позиционирования контролов Leaflet удалены. */
