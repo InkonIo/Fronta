@@ -23,37 +23,7 @@ export default function DrawingHandler({ onPolygonComplete, onStopAndSave, isDra
     };
   }, [currentPath, onStopAndSave]); // Пересоздавать эффект только при изменении currentPath или onStopAndSave
 
-  // Хук useMapEvents позволяет реагировать на события карты Leaflet
-  useMapEvents({
-    click: (e) => {
-      // Если режим рисования не активен, игнорируем клик
-      if (!isDrawing) return;
-
-      const newPoint = [e.latlng.lat, e.latlng.lng]; // Получаем координаты клика
-      setCurrentPath((prev) => [...prev, newPoint]); // Добавляем новую точку к текущему пути
-    },
-    dblclick: (e) => {
-      // Если режим рисования не активен или точек меньше 3 (недостаточно для полигона), игнорируем двойной клик
-      if (!isDrawing || currentPath.length < 3) return;
-
-      // Завершаем рисование: передаем полный путь полигона родительскому компоненту
-      onPolygonComplete(currentPath);
-      setCurrentPath([]); // Очищаем текущий путь
-      setIsDrawing(false); // Выключаем режим рисования
-    },
-    mousemove: (e) => {
-      // Если режим рисования активен и есть хотя бы одна точка в пути, обновляем hoveredPoint
-      if (isDrawing && currentPath.length > 0) {
-        setHoveredPoint([e.latlng.lat, e.latlng.lng]);
-      }
-    },
-    mouseout: () => {
-      // Когда курсор покидает карту, очищаем hoveredPoint
-      setHoveredPoint(null); 
-    }
-  });
-
-  // Если режим рисования не активен или точек нет, ничего не рендерим
+    // Если режим рисования не активен или точек нет, ничего не рендерим
   if (!isDrawing || currentPath.length === 0) {
     return null;
   }

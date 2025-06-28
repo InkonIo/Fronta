@@ -660,7 +660,6 @@ export default function PolygonDrawMap({ handleLogout }) {
     let loadedFromLocalStorage = false;
     try {
       const storedPolygons = localStorage.getItem('savedPolygons');
-      console.log('localStorage raw content for savedPolygons:', storedPolygons); // НОВЫЙ ЛОГ
       if (storedPolygons !== null && storedPolygons !== '[]') { // Проверяем, что не null и не пустой массив
         const parsedPolygons = JSON.parse(storedPolygons);
         console.log('Parsed polygons from localStorage:', parsedPolygons); // НОВЫЙ ЛОГ
@@ -675,8 +674,6 @@ export default function PolygonDrawMap({ handleLogout }) {
           console.warn('Invalid polygons data format in localStorage. Clearing and attempting to load from server.', parsedPolygons);
           localStorage.removeItem('savedPolygons'); // Очищаем поврежденные или некорректные данные
         }
-      } else {
-        console.log('localStorage для полигонов пуст или отсутствует. Загружаю с сервера.'); // НОВЫЙ ЛОГ
       }
     } catch (error) {
       console.error("Критическая ошибка парсинга полигонов из localStorage. Очищаю и пытаюсь загрузить с сервера:", error); // НОВЫЙ ЛОГ
@@ -686,7 +683,6 @@ export default function PolygonDrawMap({ handleLogout }) {
 
     // Если не удалось загрузить из localStorage, или localStorage был пуст/некорректен, загружаем с сервера
     if (!loadedFromLocalStorage) {
-      console.log('Attempting to load polygons from server as localStorage was empty or invalid.'); // НОВЫЙ ЛОГ
       showMyPolygons();
     }
   }, [showToast, showMyPolygons]); // showMyPolygons в зависимостях, чтобы гарантировать его актуальность

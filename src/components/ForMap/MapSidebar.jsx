@@ -51,13 +51,6 @@ export default function MapSidebar({
   const [isNameEditing, setIsNameEditing] = useState(false);
   const [isCropEditing, setIsCropEditing] = useState(false);
 
-  // Отладочные логи для проверки пропсов
-  useEffect(() => {
-    console.log("MapSidebar props: calculateArea type:", typeof calculateArea, "value:", calculateArea);
-    console.log("MapSidebar props: formatArea type:", typeof formatArea, "value:", formatArea);
-  }, [calculateArea, formatArea]);
-
-
   useEffect(() => {
     if (selectedPolygon) {
       const poly = polygons.find(p => p.id === selectedPolygon);

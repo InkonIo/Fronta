@@ -102,64 +102,81 @@ export default function MapComponent({
     }, [map]);
 
     useMapEvents({
-      click: (e) => {
-        if (!isDrawing) return;
-        const newPoint = [e.latlng.lat, e.latlng.lng];
-        setCurrentPath((prev) => [...prev, newPoint]);
-      },
-      dblclick: (e) => {
-        if (!isDrawing || currentPath.length < 3) return;
-        onPolygonComplete(currentPath);
-        setCurrentPath([]);
-        setIsDrawing(false);
-        setHoveredPoint(null);
-      },
-      mousemove: useCallback(async (e) => {
-        const { lat, lng } = e.latlng;
-        setInfoBoxLat(lat.toFixed(5));
-        setInfoBoxLng(lng.toFixed(5));
-        setInfoBoxVisible(true); // Устанавливаем видимость через пропс
+  mousemove: (e) => {
+    if (isDrawing && currentPath.length > 0) {
+      setHoveredPoint([e.latlng.lat, e.latlng.lng]);
+    }
 
-        if (isDrawing && currentPath.length > 0) {
-          setHoveredPoint([lat, lng]);
-        }
+    if (!isDrawing) {
+      const { lat, lng } = e.latlng;
+      setInfoBoxLat(lat.toFixed(5));
+      setInfoBoxLng(lng.toFixed(5));
+      setInfoBoxVisible(true);
 
-        if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
-        fetchTimeout.current = setTimeout(async () => {
-          setInfoBoxLoading(true);
-          setInfoBoxNdvi('Загрузка...');
-          try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${baseApiUrl}/api/v1/indices/ndvi`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({ lat, lon: lng })
-            });
+      if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
+      fetchTimeout.current = setTimeout(async () => {
+        setInfoBoxLoading(true);
+        setInfoBoxNdvi('Загрузка...');
+        try {
+          const token = localStorage.getItem('token');
+          const response = await fetch(`${baseApiUrl}/api/v1/indices/ndvi`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ lat, lon: lng })
+          });
 
-            if (!response.ok) {
-              const errorData = await response.json();
-              throw new Error(errorData.error || `Ошибка: ${response.status}`);
-            }
-
-            const data = await response.json();
-            setInfoBoxNdvi(data.ndvi !== null ? data.ndvi.toFixed(4) : 'Нет данных');
-          } catch (error) {
-            console.error('Error fetching NDVI on mousemove:', error);
-            setInfoBoxNdvi(`Ошибка: ${error.message.substring(0, 20)}...`);
-          } finally {
-            setInfoBoxLoading(false);
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Ошибка: ${response.status}`);
           }
-        }, 300);
-      }, [isDrawing, currentPath, baseApiUrl, setInfoBoxNdvi, setInfoBoxLat, setInfoBoxLng, setInfoBoxLoading, setInfoBoxVisible]),
-      mouseout: useCallback(() => {
-        setInfoBoxVisible(false); // Устанавливаем видимость через пропс
-        setHoveredPoint(null);
-        if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
-      }, [setInfoBoxVisible]),
-    });
+
+          const data = await response.json();
+          setInfoBoxNdvi(data.ndvi !== null ? data.ndvi.toFixed(4) : 'Нет данных');
+        } catch (error) {
+          console.error('Error fetching NDVI:', error);
+          setInfoBoxNdvi(`Ошибка: ${error.message.substring(0, 20)}...`);
+        } finally {
+          setInfoBoxLoading(false);
+        }
+      }, 300);
+    }
+  },
+
+  click: (e) => {
+    if (!isDrawing) return;
+    const newPoint = [e.latlng.lat, e.latlng.lng];
+
+    if (
+      currentPath.length >= 3 &&
+      isNearFirstPoint(newPoint, currentPath[0])
+    ) {
+      onPolygonComplete(currentPath);
+      setCurrentPath([]);
+      setIsDrawing(false);
+      setHoveredPoint(null);
+      return;
+    }
+
+    setCurrentPath((prev) => [...prev, newPoint]);
+  },
+
+  dblclick: (e) => {
+    if (!isDrawing || currentPath.length < 3) return;
+    onPolygonComplete(currentPath);
+    setCurrentPath([]);
+    setIsDrawing(false);
+    setHoveredPoint(null);
+  },
+
+  mouseout: () => {
+    setHoveredPoint(null);
+    setInfoBoxVisible(false);
+    if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
+  }
+});
 
     const displayDrawingPath = hoveredPoint && currentPath.length >= 1
       ? [...currentPath, hoveredPoint]
@@ -314,42 +331,50 @@ export default function MapComponent({
             // height: '180px',
             // boxSizing: 'border-box',
         }}>
-          <div
-              className="flex flex-col items-center space-y-3
-                          bg-white/10 rounded-2xl shadow-2xl p-4 backdrop-blur-lg border border-white/20"
+                    <div
+            className="flex flex-col items-center space-y-3
+                      bg-white/10 rounded-2xl shadow-2xl p-4 backdrop-blur-lg border border-white/20"
+            style={{ pointerEvents: 'none' }} // Отключаем события для всей панели
           >
-              <div
-                  className="text-white rounded-xl p-3 flex flex-col items-center justify-center space-y-1 w-full"
-                  style={{ pointerEvents: 'none' }}
-              >
-                  <p className="text-base font-medium">
-                      Шир: <span className="font-semibold">{infoBoxLat}</span>, Дол: <span className="font-semibold">{infoBoxLng}</span>
-                  </p>
-                  <p className="text-base font-medium">NDVI:
-                      {infoBoxLoading ? (
-                          <span className="loader-spin ml-2 h-4 w-4 border-2 border-t-2 border-blue-500 rounded-full inline-block"></span>
-                      ) : (
-                          <span className="font-semibold ml-2">{infoBoxNdvi}</span>
-                      )}
-                  </p>
-              </div>
+            {/* NDVI-информация */}
+            <div
+              className="text-white rounded-xl p-3 flex flex-col items-center justify-center space-y-1 w-full"
+            >
+              <p className="text-base font-medium">
+                Шир: <span className="font-semibold">{infoBoxLat}</span>, Дол: <span className="font-semibold">{infoBoxLng}</span>
+              </p>
+              <p className="text-base font-medium">NDVI:
+                {infoBoxLoading ? (
+                  <span className="loader-spin ml-2 h-4 w-4 border-2 border-t-2 border-blue-500 rounded-full inline-block"></span>
+                ) : (
+                  <span className="font-semibold ml-2">{infoBoxNdvi}</span>
+                )}
+              </p>
+            </div>
 
-              {/* Секция выбора слоев Sentinel Hub */}
-              <div className="text-white rounded-xl p-3 flex flex-col items-start w-full">
-                  <label htmlFor="sentinel-layer-select-control" className="text-sm font-medium mb-2 w-full text-center" >Выбрать слой Sentinel:</label>
-                  <select
-                      id="sentinel-layer-select-control"
-                      value={sentinelLayerId}
-                      onChange={(e) => setSentinelLayerId(e.target.value)}
-                      className="bg-white/20 text-white rounded-lg text-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-300 border border-white/30 w-full hover:bg-white/30 transition-colors duration-200"
+            {/* Секция выбора слоев Sentinel Hub */}
+            <div className="text-white rounded-xl p-3 flex flex-col items-start w-full">
+              <label htmlFor="sentinel-layer-select-control" className="text-sm font-medium mb-2 w-full text-center">
+                Выбрать слой Sentinel:
+              </label>
+              <select
+                id="sentinel-layer-select-control"
+                value={sentinelLayerId}
+                onChange={(e) => setSentinelLayerId(e.target.value)}
+                className="bg-white/20 text-white rounded-lg text-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-300 border border-white/30 w-full hover:bg-white/30 transition-colors duration-200"
+                style={{ pointerEvents: 'auto' }} // Включаем события только тут!
+              >
+                {sentinelLayerOptions.map(option => (
+                  <option
+                    key={option.id}
+                    value={option.id}
+                    className="bg-gray-800 text-white"
                   >
-                      {sentinelLayerOptions.map(option => (
-                          <option key={option.id} value={option.id} className="bg-gray-800 text-white">
-                              {option.name}
-                          </option>
-                      ))}
-                  </select>
-              </div>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       )}
