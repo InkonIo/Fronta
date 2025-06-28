@@ -1,600 +1,408 @@
 // components/ForMap/MapSidebar.jsx
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import './MapSidebar.css'; // Импортируем новый CSS для MapSidebar
-
-// --- Вспомогательные функции для парсинга/комбинирования культуры и комментария ---
-
-// Извлекает базовое название культуры из комбинированной строки
-const extractCropBase = (combinedString) => {
-  if (!combinedString) return '';
-  const lastParenIndex = combinedString.lastIndexOf('(');
-  if (lastParenIndex !== -1 && combinedString.endsWith(')')) { // Проверяем, что есть открывающая скобка и закрывающая скобка в конце
-    return combinedString.substring(0, lastParenIndex).trim();
-  }
-  return combinedString.trim(); // Если нет скобок или формат другой, возвращаем всю строку
-};
-
-// Извлекает комментарий из комбинированной строки
-const extractCropComment = (combinedString) => {
-  if (!combinedString) return '';
-  const lastParenIndex = combinedString.lastIndexOf('(');
-  const lastCloseParenIndex = combinedString.lastIndexOf(')');
-  // Проверяем, что скобки найдены, закрывающая идет после открывающей, и строка заканчивается на закрывающую скобку
-  if (lastParenIndex !== -1 && lastCloseParenIndex === combinedString.length - 1 && lastCloseParenIndex > lastParenIndex) {
-    return combinedString.substring(lastParenIndex + 1, lastCloseParenIndex).trim();
-  }
-  return ''; // Если нет комментария или формат не соответствует, возвращаем пустую строку
-};
-
-// Комбинирует базовое название культуры и комментарий в одну строку
-const combineCropAndComment = (cropBase, comment) => {
-  const base = cropBase ? cropBase.trim() : '';
-  const comm = comment ? comment.trim() : '';
-
-  if (base && comm) {
-    return `${base} (${comm})`;
-  }
-  if (base) {
-    return base;
-  }
-  return comm; 
-};
-
+import React, { useState, useEffect, useCallback } from 'react';
+import { Menu, Transition } from '@headlessui/react'; // Используем Menu и Transition для выпадающего меню
+import { Fragment } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faBars, faPlus, faEdit, faTrash, faCropSimple, faVectorSquare, faSignOutAlt, faSeedling, faLayerGroup, faSave, faTimes, faCloudArrowUp, faCloudArrowDown, faEraser,
+  faHome, faRobot, faMountainSun, faListUl // Добавлены иконки для навигации
+} from '@fortawesome/free-solid-svg-icons';
+import L from 'leaflet';
+import './MapSidebar.css'
+import { Link } from 'react-router-dom'; // Импортируем Link из react-router-dom
 
 export default function MapSidebar({
-  polygons,               // Массив всех полигонов
-  selectedPolygon,        // ID выбранного полигона (для выделения)
-  setSelectedPolygon,     // Функция для установки выбранного полигона
-  deletePolygon,          // Функция для удаления полигона
-  handleEditPolygon,      // Функция для начала редактирования формы полигона на карте
-  crops,                  // Список доступных культур
-  loadingCrops,           // Состояние загрузки списка культур (культур)
-  cropsError,             // Ошибка при загрузке культур
-  fetchCropsFromAPI,      // Функция для повторной загрузки культур
-  clearAllCrops,          // Функция для очистки всех культур с полигонов
-  updatePolygonCrop,      // Функция для обновления культуры полигона
-  calculateArea,          // Функция для расчета площади полигона
-  formatArea,             // Функция для форматирования площади
-  startDrawing,           // Функция для начала режима рисования
-  stopDrawing,            // Функция для остановки режима рисования
-  handleStopAndSaveEdit,  // Новая функция для остановки и сохранения редактирования
-  isDrawing,              // Текущее состояние режима рисования
-  isEditingMode,          // Новое состояние: активен ли режим редактирования (редактирование формы на карте)
-  clearAll,               // Функция для очистки всех полигонов (теперь запускает подтверждение)
-  handleLogout,           // Функция выхода из системы, переданная из App.js
-  showMyPolygons,         // Возвращаем showMyPolygons для кнопки "Показать мои полигоны"
-  updatePolygonName,      // Функция для обновления имени полигона (инлайн)
-  isSavingPolygon,        // Новое состояние: идет ли сохранение полигона
-  isFetchingPolygons,     // Новое состояние: идет ли загрузка полигонов
-  showCropsSection,       // НОВЫЙ ПРОП: Флаг для условного отображения секции культур
-  savePolygonToDatabase,  // НОВЫЙ ПРОП: Передан из PolygonDrawMap для onBlur сохранения
-  baseApiUrl,             // НОВЫЙ ПРОП: Базовый URL API для запросов
-  showToast,              // НОВЫЙ ПРОП: Функция для показа тост-уведомлений
+  polygons = [],
+  selectedPolygon,
+  setSelectedPolygon,
+  deletePolygon,
+  handleEditPolygon,
+  crops,
+  loadingCrops,
+  cropsError,
+  fetchCropsFromAPI,
+  clearAllCrops,
+  calculateArea = (coords) => { console.warn("calculateArea prop is missing or invalid, using default."); return 0; },
+  formatArea = (area) => { console.warn("formatArea prop is missing or invalid, using default."); return `${area} м²`; },
+  updatePolygonCrop,
+  updatePolygonName,
+  startDrawing,
+  stopDrawing,
+  handleStopAndSaveEdit,
+  isDrawing,
+  isEditingMode,
+  clearAll,
+  handleLogout,
+  showMyPolygons,
+  isSavingPolygon,
+  isFetchingPolygons,
+  showToast,
+  showCropsSection,
+  savePolygonToDatabase,
+  baseApiUrl,
+  // sentinelLayerId, // УДАЛЕНО: Теперь управляется MapComponent
+  // setSentinelLayerId, // УДАЛЕНО: Теперь управляется MapComponent
 }) {
-  // Логирование для отслеживания состояния в MapSidebar
-  console.log('MapSidebar render. isDrawing:', isDrawing, 'isEditingMode:', isEditingMode, 'isSavingPolygon:', isSavingPolygon, 'isFetchingPolygons:', isFetchingPolygons);
+  // Сайдбар по умолчанию свернут (для hover эффекта)
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+  const [editingName, setEditingName] = useState('');
+  const [editingCrop, setEditingCrop] = useState('');
+  const [editingComment, setEditingComment] = useState('');
+  const [isNameEditing, setIsNameEditing] = useState(false);
+  const [isCropEditing, setIsCropEditing] = useState(false);
 
-  const [isBurgerMenuOpen, setIsBurgerMenuOpen] = useState(false); // Состояние для управления выпадающим меню (бургер-меню)
-  const [activeSection, setActiveSection] = useState('map'); // Активная секция внутри этого меню
-  const [showPolygonsList, setShowPolygonsList] = useState(true); // Состояние для скрытия/отображения списка полигонов
-  const [isFetchingNDVI, setIsFetchingNDVI] = useState(false); // Состояние: идет ли запрос NDVI
-
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  // Обновляем активный раздел в зависимости от текущего URL
+  // Отладочные логи для проверки пропсов
   useEffect(() => {
-    if (location.pathname === '/') setActiveSection('home');
-    else if (location.pathname === '/dashboard') setActiveSection('map');
-    else if (location.pathname === '/chat') setActiveSection('ai-chat');
-    else if (location.pathname === '/earthdata') setActiveSection('soil-data');
-    else setActiveSection('');
-  }, [location.pathname]);
-
-  // Функция для навигации из бургер-меню
-  const handleNavigate = (path, section) => {
-    setIsBurgerMenuOpen(false); // Закрываем меню после выбора
-    setActiveSection(section);
-    navigate(path);
-  };
-
-  // Переключение состояния бургер-меню
-  const toggleBurgerMenu = () => {
-    setIsBurgerMenuOpen(prev => !prev);
-  };
+    console.log("MapSidebar props: calculateArea type:", typeof calculateArea, "value:", calculateArea);
+    console.log("MapSidebar props: formatArea type:", typeof formatArea, "value:", formatArea);
+  }, [calculateArea, formatArea]);
 
 
-  // Стили для основной боковой панели MapSidebar
-  const sidebarStyle = {
-    width: '30%',
-    minWidth: '300px', // Минимальная ширина для удобства
-    height: '100vh',
-    overflowY: 'auto',
-    padding: '15px',
-    backgroundColor: '#f8f9fa',
-    borderLeft: '1px solid #dee2e6',
-    fontFamily: 'Arial, sans-serif',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px', // Отступ между секциями
-    position: 'relative', // Важно для позиционирования выпадающего меню (для бургер-меню)
-  };
-
-  // Базовые стили для кнопок управления
-  const buttonStyle = {
-    padding: '8px 12px',
-    margin: '5px 0', // Отступы сверху/снизу
-    borderRadius: '5px',
-    border: '1px solid #ccc',
-    cursor: 'pointer',
-    fontSize: '14px',
-    width: '100%',
-    boxSizing: 'border-box',
-    transition: 'background-color 0.2s ease, transform 0.1s ease',
-  };
-
-  // Определяем, должна ли кнопка "Остановить и сохранить" быть активной
-  const isSaveButtonActive = isDrawing || isEditingMode;
-
-
-  // НОВАЯ ФУНКЦИЯ: Запрос NDVI для выбранного полигона
-  const fetchNdvIForSelectedPolygon = async () => {
-    if (!selectedPolygon) {
-      showToast('Пожалуйста, выберите полигон, чтобы получить NDVI.', 'info');
-      return;
-    }
-    // Отключаем кнопку, если выбран временный полигон
-    if (String(selectedPolygon).startsWith('temp-')) {
-        showToast('Пожалуйста, сохраните полигон, прежде чем запрашивать NDVI (он имеет временный ID).', 'warning');
-        return;
-    }
-
-    setIsFetchingNDVI(true);
-    const token = localStorage.getItem('token'); 
-
-    if (!token) {
-      showToast('Ошибка: Токен аутентификации отсутствует. Пожалуйста, войдите в систему.', 'error');
-      setIsFetchingNDVI(false);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${baseApiUrl}/api/v1/indices/ndvi/${selectedPolygon}`, { // Использование baseApiUrl
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}` 
-        },
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Не удалось получить NDVI.');
+  useEffect(() => {
+    if (selectedPolygon) {
+      const poly = polygons.find(p => p.id === selectedPolygon);
+      if (poly) {
+        setEditingName(poly.name || '');
+        const [cropPart, commentPart] = poly.crop ? poly.crop.split(' - ', 2) : ['', ''];
+        setEditingCrop(cropPart);
+        setEditingComment(commentPart || '');
       }
-
-      showToast(`NDVI для полигона "${polygons.find(p => p.id === selectedPolygon)?.name || selectedPolygon}": \n${data.interpretation}`, 'success');
-
-    } catch (error) {
-      console.error('Ошибка при получении NDVI:', error);
-      showToast(`Ошибка при получении NDVI: ${error.message}`, 'error');
-    } finally {
-      setIsFetchingNDVI(false);
+    } else {
+      setEditingName('');
+      setEditingCrop('');
+      setEditingComment('');
     }
-  };
+    setIsNameEditing(false);
+    setIsCropEditing(false);
+  }, [selectedPolygon, polygons]);
 
+
+  const combineCropAndComment = useCallback((crop, comment) => {
+    if (comment && comment.trim() !== '') {
+      return `${crop || ''} - ${comment.trim()}`;
+    }
+    return crop || '';
+  }, []);
+
+  const handleNameBlur = useCallback(() => {
+    if (selectedPolygon) {
+      setIsNameEditing(false);
+      const poly = polygons.find(p => p.id === selectedPolygon);
+      if (poly && poly.name !== editingName) {
+        if (editingName.trim() === '') {
+          showToast('Название полигона не может быть пустым.', 'error');
+          setEditingName(poly.name);
+          return;
+        }
+        updatePolygonName(selectedPolygon, editingName);
+        savePolygonToDatabase({ ...poly, name: editingName }, true);
+      }
+    }
+  }, [selectedPolygon, polygons, editingName, updatePolygonName, savePolygonToDatabase, showToast]);
+
+  const handleCropAndCommentBlur = useCallback(() => {
+    if (selectedPolygon) {
+      setIsCropEditing(false);
+      const poly = polygons.find(p => p.id === selectedPolygon);
+      if (poly) {
+        const newCombinedCrop = combineCropAndComment(editingCrop, editingComment);
+        if (poly.crop !== newCombinedCrop) {
+          updatePolygonCrop(selectedPolygon, newCombinedCrop);
+          savePolygonToDatabase({ ...poly, crop: newCombinedCrop }, true);
+        }
+      }
+    }
+  }, [selectedPolygon, polygons, editingCrop, editingComment, combineCropAndComment, updatePolygonCrop, savePolygonToDatabase]);
+
+  const handleCropChange = useCallback((e) => {
+    const newCrop = e.target.value;
+    setEditingCrop(newCrop);
+  }, []);
+
+  const handleCommentChange = useCallback((e) => {
+    const newComment = e.target.value;
+    setEditingComment(newComment);
+  }, []);
+
+
+  const safeCalculateArea = typeof calculateArea === 'function' ? calculateArea : (coords) => { console.warn("Using fallback calculateArea."); return 0; };
+  const safeFormatArea = typeof formatArea === 'function' ? formatArea : (area) => { console.warn("Using fallback formatArea."); return `${area} м²`; };
+
+
+  const totalArea = polygons.reduce((sum, p) => sum + safeCalculateArea(p.coordinates), 0);
+  const formattedTotalArea = safeFormatArea(totalArea);
+
+
+  const cropAreaSummary = polygons.reduce((acc, p) => {
+    if (p.crop) {
+      const area = safeCalculateArea(p.coordinates);
+      acc[p.crop] = (acc[p.crop] || 0) + area;
+    }
+    return acc;
+  }, {});
+
+  // SentinelLayerOptions УДАЛЕНЫ отсюда, так как они перемещены в MapComponent
 
   return (
-    <div style={sidebarStyle}>
-      {/* Кнопка бургер-меню внутри MapSidebar */}
-      <button className="burger-menu-icon" onClick={toggleBurgerMenu} aria-label="Открыть/закрыть меню">
-        {isBurgerMenuOpen ? '✕' : '☰'} 
-      </button>
+    // Главный контейнер сайдбара, реагирующий на наведение
+    <div
+      className={`sidebar-container ${isSidebarExpanded ? 'expanded' : 'collapsed'}`}
+      onMouseEnter={() => setIsSidebarExpanded(true)}
+      onMouseLeave={() => setIsSidebarExpanded(false)}
+    >
+      {/* Кнопка бургер-меню (всегда видна, открывает выпадающее меню) */}
+      <div className="absolute top-4 left-0 z-50 burger-menu-wrapper">
+        <Menu as="div" className="relative inline-block text-left">
+          <div>
+            <Menu.Button className="p-2 rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-all duration-200">
+              <FontAwesomeIcon icon={faBars} className="w-5 h-5" />
+            </Menu.Button>
+          </div>
 
-      {/* Выпадающее меню */}
-      {isBurgerMenuOpen && (
-        <div className="map-sidebar-dropdown-menu"> 
-          <a
-            href="#"
-            onClick={e => { e.preventDefault(); handleNavigate('/', 'home'); }}
-            className={`map-menu-item ${activeSection === 'home' ? 'active' : ''}`}
+          <Transition
+            as={Fragment}
+            enter="transition ease-out duration-100"
+            enterFrom="transform opacity-0 scale-95"
+            enterTo="transform opacity-100 scale-100"
+            leave="transition ease-in duration-75"
+            leaveFrom="transform opacity-100 scale-100"
+            leaveTo="transform opacity-0 scale-95"
           >
-            🏠 Главная
-          </a>
-          <a
-            href="#"
-            onClick={e => { e.preventDefault(); handleNavigate('/dashboard', 'map'); }}
-            className={`map-menu-item ${activeSection === 'map' ? 'active' : ''}`}
-          >
-            🗺️ Карта
-          </a>
-          <a
-            href="#"
-            onClick={e => { e.preventDefault(); handleNavigate('/chat', 'ai-chat'); }}
-            className={`map-menu-item ${activeSection === 'ai-chat' ? 'active' : ''}`}
-          >
-            🤖 ИИ-чат
-          </a>
-          <a
-            href="#"
-            onClick={e => { e.preventDefault(); handleNavigate('/earthdata', 'soil-data'); }}
-            className={`map-menu-item ${activeSection === 'soil-data' ? 'active' : ''}`}
-          >
-            🌱 Данные почвы
-          </a>
-          
-          <button onClick={handleLogout} className="map-menu-item map-logout">
-            🚪 Выйти
-          </button>
-        </div>
-      )}
-
-      <h2 style={{ color: '#333', marginBottom: '10px' }}>Управление картой</h2>
-      <hr style={{ border: 'none', height: '1px', background: '#ccc', margin: '0' }} />
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <button
-          onClick={startDrawing}
-          disabled={isDrawing || isEditingMode || isSavingPolygon || isFetchingPolygons}
-          style={{ ...buttonStyle, 
-            backgroundColor: (isDrawing || isEditingMode || isSavingPolygon || isFetchingPolygons) ? '#b3e0ff' : '#4CAF50', 
-            color: 'white' 
-          }}
-        >
-          {isDrawing ? '✏️ Рисую...' : '✏️ Начать рисование'}
-        </button>
-
-        <button
-          onClick={handleStopAndSaveEdit} 
-          disabled={!isSaveButtonActive || isSavingPolygon || isFetchingPolygons}
-          style={{ ...buttonStyle, 
-            backgroundColor: isSaveButtonActive ? '#ff9800' : '#f0f0f0', 
-            color: isSaveButtonActive ? 'white' : '#666' 
-          }}
-        >
-          {isSavingPolygon ? '💾 Сохраняю...' : (isEditingMode ? '💾 Сохранить изменения' : '💾 Остановить и сохранить')}
-        </button>
-
-        <button
-          onClick={clearAll} 
-          disabled={isSavingPolygon || isFetchingPolygons || polygons.length === 0}
-          style={{ ...buttonStyle, 
-            backgroundColor: (isSavingPolygon || isFetchingPolygons || polygons.length === 0) ? '#cccccc' : '#f44336', 
-            color: 'white' 
-          }}
-        >
-          🗑️ Очистить все полигоны
-        </button>
-        
-        {/* Объединенная кнопка Скрыть/Показать список и загрузка с сервера */}
-        <button
-          onClick={() => {
-            // Если список скрыт, инициируем загрузку с сервера, прежде чем показать
-            if (!showPolygonsList) { 
-              showMyPolygons(); 
-            }
-            setShowPolygonsList(prev => !prev);
-          }}
-          disabled={isSavingPolygon || isFetchingPolygons || isDrawing || isEditingMode}
-          style={{
-            ...buttonStyle,
-            backgroundColor: showPolygonsList ? '#6c757d' : '#007bff', 
-            color: 'white',
-            marginTop: '15px', 
-          }}
-        >
-          {isFetchingPolygons ? '📂 Загружаю список...' : (showPolygonsList ? '🙈 Скрыть список полигонов' : '👀 Показать и загрузить полигоны')}
-        </button>
-
-        {/* Кнопка: Получить NDVI */}
-        <button
-          onClick={fetchNdvIForSelectedPolygon}
-          disabled={
-            !selectedPolygon || 
-            isFetchingNDVI || 
-            isSavingPolygon || 
-            isFetchingPolygons || 
-            isDrawing || 
-            isEditingMode ||
-            String(selectedPolygon).startsWith('temp-') // Отключаем для временных ID
-          }
-          style={{
-            ...buttonStyle,
-            backgroundColor: (!selectedPolygon || isFetchingNDVI || isSavingPolygon || isFetchingPolygons || isDrawing || isEditingMode || String(selectedPolygon).startsWith('temp-')) ? '#cccccc' : '#8BC34A', // Greenish color
-            color: 'white',
-            marginTop: '15px',
-          }}
-        >
-          {isFetchingNDVI ? '📊 Получаю NDVI...' : '📊 Получить NDVI'}
-        </button>
-
+            <Menu.Items className="absolute left-full ml-2 w-56 origin-top-left map-sidebar-dropdown-menu">
+              <div className="py-1">
+                <Menu.Item>
+                  {({ active }) => (
+                    <Link to="/home" className={`${active ? 'bg-gray-800' : 'text-gray-200'} group flex items-center w-full px-4 py-2 text-sm`}>
+                      <FontAwesomeIcon icon={faHome} className="mr-3 h-5 w-5 text-gray-400 group-hover:text-white" />
+                      Главная
+                    </Link>
+                  )}
+                </Menu.Item>
+                <Menu.Item>
+                  {({ active }) => (
+                    <Link to="/chat" className={`${active ? 'bg-gray-800' : 'text-gray-200'} group flex items-center w-full px-4 py-2 text-sm`}>
+                      <FontAwesomeIcon icon={faRobot} className="mr-3 h-5 w-5 text-gray-400 group-hover:text-white" />
+                      Чат ИИ
+                    </Link>
+                  )}
+                </Menu.Item>
+                <Menu.Item>
+                  {({ active }) => (
+                    <Link to="/earthdata" className={`${active ? 'bg-gray-800' : 'text-gray-200'} group flex items-center w-full px-4 py-2 text-sm`}>
+                      <FontAwesomeIcon icon={faMountainSun} className="mr-3 h-5 w-5 text-gray-400 group-hover:text-white" />
+                      Почва
+                    </Link>
+                  )}
+                </Menu.Item>
+                {/* Пункт "Мои полигоны" (Карта) не добавляем, так как мы уже на карте */}
+                <div className="border-t border-gray-700 my-1"></div>
+                <Menu.Item>
+                  {({ active }) => (
+                    <button
+                      onClick={handleLogout}
+                      className={`${active ? 'bg-red-700' : 'map-logout'} group flex items-center w-full px-4 py-2 text-sm text-white`}
+                    >
+                      <FontAwesomeIcon icon={faSignOutAlt} className="mr-3 h-5 w-5 text-white group-hover:text-white" />
+                      Выйти
+                    </button>
+                  )}
+                </Menu.Item>
+              </div>
+            </Menu.Items>
+          </Transition>
+        </Menu>
       </div>
 
-      <hr style={{ border: 'none', height: '1px', background: '#ccc', margin: '0' }} />
+      {/* Контейнер для основных кнопок действий (иконки + текст при разворачивании) */}
+      <div className="main-action-buttons-wrapper">
+        <button
+          onClick={startDrawing}
+          disabled={isDrawing || isEditingMode}
+          className={`sidebar-icon-button ${isDrawing ? 'bg-blue-800' : 'bg-blue-600'} text-white hover:bg-blue-700`}
+          title="Начать рисование полигона"
+        >
+          <FontAwesomeIcon icon={faPlus} className="w-5 h-5" />
+          <span className="button-text">Начать рисование</span>
+        </button>
 
-      {showPolygonsList && polygons.length > 0 && (
-        <div style={{ marginTop: '10px' }}>
-          <h3 style={{ margin: '0 0 15px 0', color: '#333', fontSize: '18px' }}>
-            📐 Полигоны ({polygons.length})
-          </h3>
-          <div style={{ maxHeight: '25vh', overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '10px' }}>
-            {polygons.map((polygon, idx) => (
-              <div
-                key={polygon.id}
-                style={{
-                  marginBottom: '12px',
-                  padding: '10px',
-                  backgroundColor: selectedPolygon === polygon.id ? '#e3f2fd' : '#fff',
-                  border: selectedPolygon === polygon.id ? '2px solid #2196f3' : '1px solid #e0e0e0',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                }}
-                onClick={() => setSelectedPolygon(polygon.id)}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
-                  {/* Инлайн-редактирование имени полигона */}
-                  {selectedPolygon === polygon.id ? (
+        <button
+          onClick={handleStopAndSaveEdit}
+          disabled={!isDrawing && !isEditingMode && !selectedPolygon}
+          className={`sidebar-icon-button ${(!isDrawing && !isEditingMode && !selectedPolygon) ? 'bg-gray-700' : 'bg-green-600'} text-white hover:bg-green-700`}
+          title="Сохранить/Завершить редактирование"
+        >
+          <FontAwesomeIcon icon={faSave} className="w-5 h-5" />
+          <span className="button-text">Сохранить/Завершить</span>
+        </button>
+
+        <button
+          onClick={showMyPolygons}
+          disabled={isSavingPolygon || isFetchingPolygons || isDrawing || isEditingMode}
+          className={`sidebar-icon-button btn-transparent-dark ${isFetchingPolygons ? 'opacity-70 cursor-not-allowed' : ''}`}
+          title="Загрузить мои полигоны"
+        >
+          {isFetchingPolygons ? (
+            <span className="loader-spin inline-block h-4 w-4 border-2 border-t-2 border-blue-400 rounded-full"></span>
+          ) : (
+            <FontAwesomeIcon icon={faCloudArrowDown} className="w-5 h-5" />
+          )}
+          <span className="button-text">Загрузить полигоны</span>
+        </button>
+
+        <button
+          onClick={clearAll}
+          disabled={polygons.length === 0 || isDrawing || isEditingMode || isSavingPolygon || isFetchingPolygons}
+          className={`sidebar-icon-button bg-red-800 text-white hover:bg-red-900 ${polygons.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+          title="Удалить все полигоны"
+        >
+          <FontAwesomeIcon icon={faEraser} className="w-5 h-5" />
+          <span className="button-text">Удалить все</span>
+        </button>
+
+        <button
+          onClick={clearAllCrops}
+          disabled={polygons.length === 0 || isDrawing || isEditingMode || isSavingPolygon || isFetchingPolygons}
+          className={`sidebar-icon-button bg-purple-700 text-white hover:bg-purple-800 ${polygons.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+          title="Очистить все культуры"
+        >
+          <FontAwesomeIcon icon={faSeedling} className="w-5 h-5" />
+          <span className="button-text">Очистить культуры</span>
+        </button>
+      </div>
+
+      {/* Основное содержимое сайдбара, которое появляется при разворачивании */}
+      <div className={`collapsible-content ${isSidebarExpanded ? 'expanded' : ''}`}>
+        <h2 className="text-xl font-bold text-gray-100 mb-6 main-title">Панель управления картой</h2> {/* Уменьшен размер шрифта */}
+
+        {/* Секция управления слоями Sentinel Hub УДАЛЕНА ИЗ САЙДБАРА */}
+
+        {/* Список полигонов */}
+        <div className="section-block flex-grow overflow-y-auto polygon-list-container">
+          <h3>Мои полигоны</h3>
+          {isFetchingPolygons ? (
+            <div className="text-center text-gray-400 py-4">
+              <span className="loader-spin inline-block h-6 w-6 border-4 border-t-4 border-blue-500 rounded-full"></span>
+              <p className="mt-2">Загрузка полигонов...</p>
+            </div>
+          ) : polygons.length === 0 ? (
+            <p className="text-gray-400 text-sm">Полигоны пока не добавлены.</p>
+          ) : (
+            <ul className="space-y-3">
+              {polygons.map((polygon) => (
+                <li
+                  key={polygon.id}
+                  onClick={() => setSelectedPolygon(polygon.id)}
+                  className={`polygon-item ${selectedPolygon === polygon.id ? 'selected' : ''}`}
+                >
+                  {isNameEditing && selectedPolygon === polygon.id ? (
                     <input
                       type="text"
-                      value={polygon.name || ''} 
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        updatePolygonName(polygon.id, e.target.value); 
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onBlur={handleNameBlur}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.target.blur();
                       }}
-                      onBlur={(e) => {
-                        e.stopPropagation();
-                        const updatedPoly = polygons.find(p => p.id === polygon.id);
-                        if (updatedPoly && updatedPoly.name !== (e.target.value || '').trim()) { 
-                           const polyToSave = { ...updatedPoly, name: (e.target.value || '').trim() }; 
-                           savePolygonToDatabase(polyToSave, true); 
-                        }
-                      }}
-                      onClick={(e) => e.stopPropagation()} 
-                      style={{
-                        padding: '4px',
-                        border: '1px solid #ccc',
-                        borderRadius: '4px',
-                        fontSize: '14px',
-                        width: '100%',
-                        boxSizing: 'border-box',
-                        color: '#000', 
-                        backgroundColor: '#f8f8f8' 
-                      }}
-                      disabled={isSavingPolygon || isFetchingPolygons}
+                      className="w-full bg-gray-700 text-white rounded px-2 py-1"
+                      autoFocus
                     />
                   ) : (
-                    <strong style={{ color: '#333', fontSize: '14px' }}>
-                      {polygon.name || `Полигон #${idx + 1}`} 
+                    <strong
+                      className="text-gray-100 block truncate"
+                      onClick={(e) => { e.stopPropagation(); setSelectedPolygon(polygon.id); setIsNameEditing(true); }}
+                      title={polygon.name}
+                    >
+                      {polygon.name || 'Без названия'}
                     </strong>
                   )}
 
-                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deletePolygon(polygon.id); }}
-                      style={{ padding: '4px 8px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}
-                      disabled={isSavingPolygon || isFetchingPolygons}
-                    >
-                      Удалить
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleEditPolygon(polygon.id); }}
-                      disabled={isEditingMode || isDrawing || isSavingPolygon || isFetchingPolygons}
-                      style={{ 
-                        padding: '4px 8px', 
-                        backgroundColor: (isEditingMode || isDrawing || isSavingPolygon || isFetchingPolygons) ? '#cccccc' : '#ffc107', 
-                        color: (isEditingMode || isDrawing || isFetchingPolygons) ? '#666666' : '#000', 
-                        border: 'none', 
-                        borderRadius: '4px', 
-                        cursor: (isEditingMode || isDrawing || isSavingPolygon || isFetchingPolygons) ? 'not-allowed' : 'pointer', 
-                        fontSize: '11px' 
-                      }}
-                    >
-                      ✏️ Редактировать Форму
-                    </button>
-                  </div>
-                </div>
-                <div 
-                  style={{ 
-                    fontSize: '12px', 
-                    color: '#444', 
-                    marginBottom: '8px' 
-                  }}
-                >
-                  <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'center' }}>
-                    <span>Точек: {polygon.coordinates.length}</span>
-                    <span>Площадь: {formatArea(calculateArea(polygon.coordinates))}</span>
-                    <div style={{ width: '18px', height: '18px', backgroundColor: polygon.color, borderRadius: '4px', border: '1px solid #ddd' }}></div>
-                  </div>
-                </div>
-                {/* Инлайн-редактирование культуры полигона */}
-                {selectedPolygon === polygon.id && (
-                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div>
-                      <label htmlFor={`crop-select-${polygon.id}`} style={{ display: 'block', marginBottom: '5px', fontSize: '12px', color: '#555' }}>
-                        Культура:
-                      </label>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Площадь: {safeFormatArea(safeCalculateArea(polygon.coordinates))}
+                  </p>
+                  
+                  <p className="text-gray-400 text-sm">
+                    Культура:
+                    {isCropEditing && selectedPolygon === polygon.id ? (
                       <select
-                        id={`crop-select-${polygon.id}`}
-                        value={extractCropBase(polygon.crop) || ''}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          const newCropBase = e.target.value;
-                          const currentComment = extractCropComment(polygon.crop);
-                          const newCombinedCrop = combineCropAndComment(newCropBase, currentComment);
-                          updatePolygonCrop(polygon.id, newCombinedCrop);
-                        }}
-                        onBlur={(e) => {
-                          e.stopPropagation();
-                          const originalPoly = polygons.find(p => p.id === polygon.id);
-                          const newCropBase = e.target.value;
-                          const currentComment = extractCropComment(originalPoly.crop); 
-                          const newCombinedCrop = combineCropAndComment(newCropBase, currentComment);
-                          
-                          if (originalPoly && originalPoly.crop !== newCombinedCrop) { 
-                              savePolygonToDatabase({ ...originalPoly, crop: newCombinedCrop }, true); 
-                          }
-                        }}
-                        disabled={isSavingPolygon || isFetchingPolygons}
-                        style={{ 
-                          padding: '4px 8px', 
-                          border: '1px solid #ced4da', 
-                          borderRadius: '4px', 
-                          backgroundColor: (isSavingPolygon || isFetchingPolygons) ? '#e0e0e0' : '#fff', 
-                          fontSize: '11px', 
-                          cursor: (isSavingPolygon || isFetchingPolygons) ? 'not-allowed' : 'pointer', 
-                          flex: 1, 
-                          minWidth: '120px',
-                          color: '#333'
-                        }}
+                        value={editingCrop}
+                        onChange={handleCropChange}
+                        onBlur={handleCropAndCommentBlur}
+                        className="w-full bg-gray-700 text-white rounded px-2 py-1 mt-1"
+                        autoFocus
                       >
-                        <option value="">Выберите культуру</option>
-                        {crops.map((crop) => (
-                          <option key={crop} value={crop} style={{ color: '#333' }}>
-                            {crop}
-                          </option>
+                        <option value="">Не выбрана</option>
+                        {crops.map((cropName) => (
+                          <option key={cropName} value={cropName}>{cropName}</option>
                         ))}
                       </select>
-                    </div>
-                    <div>
-                      <label htmlFor={`crop-comment-${polygon.id}`} style={{ display: 'block', marginBottom: '5px', fontSize: '12px', color: '#555' }}>
-                        Комментарий:
-                      </label>
-                      <input
-                        id={`crop-comment-${polygon.id}`}
-                        type="text"
-                        placeholder="Добавить комментарий..."
-                        value={extractCropComment(polygon.crop) || ''}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          const currentCropBase = extractCropBase(polygon.crop);
-                          const newComment = e.target.value;
-                          const newCombinedCrop = combineCropAndComment(currentCropBase, newComment);
-                          updatePolygonCrop(polygon.id, newCombinedCrop);
-                        }}
-                        onBlur={(e) => {
-                          e.stopPropagation();
-                          const originalPoly = polygons.find(p => p.id === polygon.id);
-                          const currentCropBase = extractCropBase(originalPoly.crop); 
-                          const newComment = e.target.value;
-                          const newCombinedCrop = combineCropAndComment(currentCropBase, newComment);
-                          
-                          if (originalPoly && originalPoly.crop !== newCombinedCrop) { 
-                              savePolygonToDatabase({ ...originalPoly, crop: newCombinedCrop }, true); 
-                          }
-                        }}
-                        disabled={isSavingPolygon || isFetchingPolygons}
-                        style={{
-                          padding: '4px 8px',
-                          border: '1px solid #ced4da',
-                          borderRadius: '4px',
-                          backgroundColor: 'white', 
-                          fontSize: '11px',
-                          cursor: (isSavingPolygon || isFetchingPolygons) ? 'not-allowed' : 'pointer',
-                          width: '100%',
-                          boxSizing: 'border-box',
-                          color: '#000', 
-                          opacity: 1 
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {polygon.crop && selectedPolygon !== polygon.id && (
-                  <div 
-                    style={{ 
-                      fontSize: '12px', 
-                      color: '#2e7d32', 
-                      fontWeight: 'bold', 
-                      backgroundColor: '#e8f5e8', 
-                      padding: '5px 8px', 
-                      borderRadius: '4px', 
-                      marginTop: '8px', 
-                      opacity: 1, 
-                      display: 'block' 
-                    }}
-                  >
-                    🌾 {polygon.crop}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+                    ) : (
+                      <span
+                        className={`inline-block ml-1 px-2 py-1 rounded-md text-green-400 bg-green-900/20`}
+                        onClick={(e) => { e.stopPropagation(); setSelectedPolygon(polygon.id); setIsCropEditing(true); }}
+                        title={polygon.crop}
+                      >
+                        {editingCrop || 'Не указана'}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Комментарий:
+                    <input
+                      type="text"
+                      value={editingComment}
+                      onChange={handleCommentChange}
+                      onBlur={handleCropAndCommentBlur}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.target.blur();
+                      }}
+                      className="w-full bg-gray-700 text-white rounded px-2 py-1 mt-1"
+                      placeholder="Добавить комментарий..."
+                    />
+                  </p>
 
-      {showCropsSection && (
-        <div style={{ 
-          backgroundColor: '#fff', 
-          border: '1px solid #dee2e6', 
-          borderRadius: '8px', 
-          overflow: 'hidden', 
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          marginTop: polygons.length > 0 ? '10px' : '0' 
-        }}>
-          <div style={{ backgroundColor: '#f8f9fa', padding: '12px', borderBottom: '1px solid #dee2e6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h4 style={{ margin: 0, color: '#333', fontSize: '16px' }}>
-              🌾 Сводка культур
-            </h4>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                onClick={fetchCropsFromAPI}
-                disabled={loadingCrops || isSavingPolygon || isFetchingPolygons}
-                style={{ padding: '6px 10px', backgroundColor: (loadingCrops || isSavingPolygon || isFetchingPolygons) ? '#ccc' : '#17a2b8', color: 'white', border: 'none', borderRadius: '4px', cursor: (loadingCrops || isSavingPolygon || isFetchingPolygons) ? 'not-allowed' : 'pointer', fontSize: '11px' }}
-              >
-                {loadingCrops ? 'Загружаю...' : '🔄'}
-              </button>
-              <button
-                onClick={clearAllCrops}
-                disabled={isSavingPolygon || isFetchingPolygons}
-                style={{ padding: '6px 10px', backgroundColor: (isSavingPolygon || isFetchingPolygons) ? '#cccccc' : '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: (isSavingPolygon || isFetchingPolygons) ? 'not-allowed' : 'pointer', fontSize: '11px' }}
-              >
-                🗑️
-              </button>
-            </div>
-          </div>
 
-          {cropsError && (
-            <div style={{ padding: '8px 12px', backgroundColor: '#f8d7da', color: '#721c24', fontSize: '11px' }}>
-              ⚠️ {cropsError}
-            </div>
+                  <div className="flex justify-end space-x-2 mt-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleEditPolygon(polygon.id); }}
+                      className="sidebar-button bg-yellow-600 text-white hover:bg-yellow-700 px-2 py-1"
+                      title="Редактировать форму полигона"
+                      disabled={isDrawing || isEditingMode}
+                    >
+                      <FontAwesomeIcon icon={faVectorSquare} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deletePolygon(polygon.id); }}
+                      className="sidebar-button bg-red-600 text-white hover:bg-red-700 px-2 py-1"
+                      title="Удалить полигон"
+                      disabled={isDrawing || isEditingMode}
+                    >
+                      <FontAwesomeIcon icon={faTrash} />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
-
-          {/* Сводка */}
-          <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '6px', border: '1px solid #e9ecef', fontSize: '11px' }}>
-            <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Сводка:</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
-              <div>Полигонов: {polygons.length}</div>
-              <div>С культурами: {polygons.filter((p) => p.crop).length}</div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                Общая площадь:{' '}
-                {formatArea(polygons.reduce((total, p) => total + calculateArea(p.coordinates), 0))}
-              </div>
-            </div>
-            {polygons.some((p) => p.crop) && (
-              <div style={{ marginTop: '10px' }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>По культурам:</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  {Object.entries(
-                    polygons.filter((p) => p.crop).reduce((acc, p) => {
-                      const area = calculateArea(p.coordinates);
-                      const baseCrop = extractCropBase(p.crop); 
-                      if (baseCrop) {
-                         acc[baseCrop] = (acc[baseCrop] || 0) + area;
-                      }
-                      return acc;
-                    }, {})
-                  ).map(([crop, area]) => (
-                    <div key={crop} style={{ padding: '2px 6px', backgroundColor: '#e8f5e8', borderRadius: '3px', fontSize: '10px', color: '#2e7d32' }}>
-                      {crop}: {formatArea(area)}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
         </div>
-      )}
+
+        {/* Секция сводки */}
+        <div className="section-block summary-block">
+          <h3>Сводка по площадям</h3>
+          <p className="text-gray-200 text-sm mb-2">Общая площадь: <span className="font-semibold text-gray-50">{formattedTotalArea}</span></p>
+          <h4 className="text-gray-300 text-sm font-semibold mb-1">По культурам:</h4>
+          {Object.keys(cropAreaSummary).length === 0 ? (
+            <p className="text-gray-400 text-xs">Культуры не назначены.</p>
+          ) : (
+            <ul className="flex flex-wrap gap-2 text-xs">
+              {Object.entries(cropAreaSummary).map(([crop, area]) => (
+                <li key={crop} className="px-2 py-1 rounded-md bg-green-900/20 text-green-400 font-medium">
+                  {crop}: {safeFormatArea(area)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

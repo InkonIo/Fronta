@@ -12,13 +12,13 @@
 
 /* Стили для кнопок контроля Leaflet-Draw (можно настроить по желанию) */
 .leaflet-draw-toolbar a {
-  border-radius: 4px !important; /* Скругленные углы для кнопок инструментов */
+  border-radius: 4px !important; /* Скругленные углы для кнопочек инструментов */
 }
 
 .leaflet-draw-toolbar a.leaflet-draw-edit-enabled,
 .leaflet-draw-toolbar a.leaflet-draw-create-enabled {
-  background-color: #007bff; /* Цвет фона для активных кнопок */
-  color: white; /* Цвет текста для активных кнопок */
+  background-color: #007bff; /* Цвет фона для активных кнопочек */
+  color: white; /* Цвет текста для активных кнопочек */
 }
 
 /* Стили для информационного блока при рисовании */
@@ -45,3 +45,16 @@
 .drawing-info-box div {
   line-height: 1.4;
 }
+
+/* Loader Spin Animation (для MapComponent) */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.loader-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Удалены все предыдущие специфические стили для .leaflet-control-container, .leaflet-bottom, .leaflet-left, .leaflet-control-bottom-center
+   Позиционирование теперь полностью управляется инлайн-стилями на div, созданном Leaflet Control. */

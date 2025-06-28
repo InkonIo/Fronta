@@ -1,227 +1,403 @@
 // components/ForMap/MapComponent.jsx
-import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { MapContainer, TileLayer, FeatureGroup, useMapEvents, useMap } from 'react-leaflet'; // Добавил useMap
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import ReactDOM from 'react-dom/client';
+import { MapContainer, TileLayer, FeatureGroup, Polygon, useMapEvents, useMap } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import * as L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
-import 'leaflet.markercluster/dist/MarkerCluster.css';
-import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 
-import DrawingHandler from './DrawingHandler';
-import PolygonAndMarkerLayer from './PolygonAndMarkerLayer'; // Компонент для отображения полигонов и маркеров
+import PolygonAndMarkerLayer from './PolygonAndMarkerLayer';
 
-// Исправляем иконки по умолчанию для Leaflet Draw
+// Fix for default Leaflet icon paths
+delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
   iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
 });
 
+// IMPORTANT: Replace with your actual Sentinel Hub Instance ID
+const SENTINEL_HUB_INSTANCE_ID = 'f15c44d0-bbb8-4c66-b94e-6a8c7ab39349';
+
 export default function MapComponent({
   polygons,
   onPolygonComplete,
   onPolygonEdited,
-  setIsDrawing,
   isDrawing,
+  setIsDrawing,
   editableFGRef,
   selectedPolygon,
   isEditingMode,
-  editingMapPolygon // <-- Новый пропс: полигон, который сейчас редактируется
+  editingMapPolygon,
+  sentinelLayerId,
+  setSentinelLayerId,
+  baseApiUrl,
+  calculateArea,
+  formatArea
 }) {
-  const mapRef = useRef(null);
-  const [zoom, setZoom] = useState(13); // Состояние для отслеживания текущего зума карты
+  const mapRef = useRef();
+  const [sentinelLayer, setSentinelLayer] = useState(null);
 
-  // Внутренний компонент для доступа к экземпляру карты через useMap
-  const MapInteractionHandler = () => {
-    const map = useMap(); // Получаем экземпляр карты Leaflet
+  const [currentPath, setCurrentPath] = useState([]);
+  const [hoveredPoint, setHoveredPoint] = useState(null);
 
-    // Функция для центрирования и приближения к маркеру
-    const flyToMarker = useCallback((latlng, newZoom = 15) => {
-      if (map) {
-        map.flyTo(latlng, newZoom, {
-          duration: 1.5, // Длительность анимации в секундах
-        });
-      }
+  // Для отладки делаем true по умолчанию, чтобы блок всегда был виден
+  const [infoBoxVisible, setInfoBoxVisible] = useState(true);
+  const [infoBoxLat, setInfoBoxLat] = useState(null);
+  const [infoBoxLng, setInfoBoxLng] = useState(null);
+  const [infoBoxNdvi, setInfoBoxNdvi] = useState('Загрузка...');
+  const [infoBoxLoading, setInfoBoxLoading] = useState(false);
+
+  useEffect(() => {
+    window.clearCurrentPath = () => {
+      setCurrentPath([]);
+      setIsDrawing(false);
+      setHoveredPoint(null);
+    };
+    return () => {
+      window.clearCurrentPath = null;
+    };
+  }, [setIsDrawing]);
+
+  const MapContentAndInteractions = ({
+    isDrawing,
+    currentPath,
+    setCurrentPath,
+    setHoveredPoint,
+    onPolygonComplete,
+    setInfoBoxLat,
+    setInfoBoxLng,
+    setInfoBoxVisible,
+    baseApiUrl,
+    setInfoBoxLoading,
+    setInfoBoxNdvi,
+    polygons,
+    editableFGRef,
+    selectedPolygon,
+    isEditingMode,
+    editingMapPolygon,
+    onEdited,
+    onDeleted,
+    calculateArea,
+    formatArea
+  }) => {
+    const map = useMap();
+    const editControlRefInternal = useRef();
+    const fetchTimeout = useRef(null);
+
+    const flyToMarker = useCallback((center, zoom) => {
+      map.flyTo(center, zoom);
     }, [map]);
 
-    // Передаем flyToMarker через контекст или как обычный пропс вниз,
-    // но для простоты, если PolygonAndMarkerLayer является прямым потомком MapComponent,
-    // можно передать его напрямую в MapComponent и затем в PolygonAndMarkerLayer.
-    // Здесь мы просто возвращаем null, так как эта функция предназначена для использования родительским компонентом
-    // и передачей вниз через пропсы.
-    useEffect(() => {
-      // Это способ передать функцию flyToMarker на уровень MapComponent
-      // чтобы затем MapComponent передал ее в PolygonAndMarkerLayer.
-      // Обычно, если MapInteractionHandler не является отдельным компонентом,
-      // flyToMarker можно объявить непосредственно в MapComponent.
-      // Но в данной структуре, мы можем вернуть ее из useMapEvents или использовать контекст.
-      // Проще всего объявить ее в родительском компоненте и передать.
-      // Для этой демонстрации, я передам map.flyTo напрямую из MapComponent в PolygonAndMarkerLayer.
-    }, [flyToMarker]);
-
-    // Возвращаем null, так как этот компонент не рендерит UI сам по себе
-    // он только предоставляет доступ к экземпляру карты.
     useMapEvents({
-        zoomend: (e) => {
-            setZoom(e.target.getZoom());
-        },
+      click: (e) => {
+        if (!isDrawing) return;
+        const newPoint = [e.latlng.lat, e.latlng.lng];
+        setCurrentPath((prev) => [...prev, newPoint]);
+      },
+      dblclick: (e) => {
+        if (!isDrawing || currentPath.length < 3) return;
+        onPolygonComplete(currentPath);
+        setCurrentPath([]);
+        setIsDrawing(false);
+        setHoveredPoint(null);
+      },
+      mousemove: useCallback(async (e) => {
+        const { lat, lng } = e.latlng;
+        setInfoBoxLat(lat.toFixed(5));
+        setInfoBoxLng(lng.toFixed(5));
+        // setInfoBoxVisible(true); // Теперь infoBoxVisible всегда true для отладки
+
+        if (isDrawing && currentPath.length > 0) {
+          setHoveredPoint([lat, lng]);
+        }
+
+        if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
+        fetchTimeout.current = setTimeout(async () => {
+          setInfoBoxLoading(true);
+          setInfoBoxNdvi('Загрузка...');
+          try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${baseApiUrl}/api/v1/indices/ndvi`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ lat, lon: lng })
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || `Ошибка: ${response.status}`);
+            }
+
+            const data = await response.json();
+            setInfoBoxNdvi(data.ndvi !== null ? data.ndvi.toFixed(4) : 'Нет данных');
+          } catch (error) {
+            console.error('Error fetching NDVI on mousemove:', error);
+            setInfoBoxNdvi(`Ошибка: ${error.message.substring(0, 20)}...`);
+          } finally {
+            setInfoBoxLoading(false);
+          }
+        }, 300);
+      }, [isDrawing, currentPath, baseApiUrl, setInfoBoxNdvi]),
+      mouseout: useCallback(() => {
+        // setInfoBoxVisible(false); // Теперь infoBoxVisible всегда true для отладки
+        setHoveredPoint(null);
+        if (fetchTimeout.current) clearTimeout(fetchTimeout.current);
+      }, []),
     });
-    return null;
+
+    const displayDrawingPath = hoveredPoint && currentPath.length >= 1
+      ? [...currentPath, hoveredPoint]
+      : currentPath;
+
+    return (
+      <>
+        <FeatureGroup ref={editableFGRef}>
+          <EditControl
+            ref={editControlRefInternal}
+            position={null}
+            onCreated={() => {}}
+            onEdited={onEdited}
+            onDeleted={onDeleted}
+            draw={{
+              polygon: false, rectangle: false, circle: false, marker: false, polyline: false, circlemarker: false,
+            }}
+            edit={{
+              featureGroup: editableFGRef.current,
+              edit: isEditingMode ? { selectedPathOptions: {} } : false,
+              remove: false,
+            }}
+          />
+          <PolygonAndMarkerLayer
+            polygons={polygons.filter(p => !(isEditingMode && editingMapPolygon && editingMapPolygon.id === p.id))}
+            calculateArea={calculateArea}
+            formatArea={formatArea}
+            selectedPolygon={selectedPolygon}
+            flyToMarker={flyToMarker}
+          />
+        </FeatureGroup>
+
+        {isDrawing && currentPath.length > 0 && (
+          <Polygon
+            positions={displayDrawingPath}
+            pathOptions={{
+              color: '#2196f3',
+              fillOpacity: 0.2,
+              dashArray: currentPath.length > 0 ? '5, 5' : null,
+              weight: 2
+            }}
+          />
+        )}
+      </>
+    );
   };
 
-
-  // Мемоизированные функции для расчета и форматирования площади (передаются в PolygonAndMarkerLayer)
-  const calculateArea = useCallback((coordinates) => {
-    if (coordinates.length < 3) return 0;
-    const toRadians = (deg) => (deg * Math.PI) / 180;
-    const R = 6371000;
-    let area = 0;
-    const n = coordinates.length;
-
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      const lat1 = toRadians(coordinates[i][0]);
-      const lat2 = toRadians(coordinates[j][0]);
-      const deltaLon = toRadians(coordinates[j][1] - coordinates[i][1]);
-
-      const E =
-        2 *
-        Math.asin(
-          Math.sqrt(
-            Math.pow(Math.sin((lat2 - lat1) / 2), 2) +
-            Math.cos(lat1) *
-            Math.cos(lat2) *
-            Math.pow(Math.sin(deltaLon / 2), 2)
-          )
-        );
-      area += E * R * R;
-    }
-    return Math.abs(area) / 2;
-  }, []);
-
-  const formatArea = useCallback((area) => {
-    if (area < 10000) return `${area.toFixed(1)} м²`;
-    if (area < 1000000) return `${(area / 10000).toFixed(1)} га`;
-    return `${(area / 1000000).toFixed(1)} км²`;
-  }, []);
-
-  // stopAndSaveDrawingFromMap больше не используется напрямую здесь, DrawingHandler обрабатывает это
-  const stopAndSaveDrawingFromMap = useCallback((currentPath) => {
-    if (currentPath && currentPath.length >= 3) {
-      onPolygonComplete(currentPath);
-    }
-    setIsDrawing(false);
-    if (window.clearCurrentPath) window.clearCurrentPath();
-  }, [onPolygonComplete, setIsDrawing]);
-
-  // НОВЫЙ ЭФФЕКТ ДЛЯ РЕДАКТИРОВАНИЯ:
-  // Этот эффект отвечает за добавление полигона в editableFGRef и включение редактирования
   useEffect(() => {
-    // Проверяем, что режим редактирования включен, реф доступен и есть полигон для редактирования
-    if (isEditingMode && editableFGRef.current && editingMapPolygon) {
-      console.log('[MapComponent useEffect] Editing mode active, ref and polygon available.');
-      // Очищаем любые предыдущие слои в editableFGRef, чтобы убедиться, что только один полигон активен для редактирования
-      editableFGRef.current.clearLayers();
+    const fg = editableFGRef.current;
+    if (!fg) return;
 
-      // Создаем Leaflet Polygon слой из координат полигона, который редактируется
+    if (isEditingMode && editingMapPolygon) {
+      fg.clearLayers();
       const leafletPolygon = L.polygon(editingMapPolygon.coordinates);
-      editableFGRef.current.addLayer(leafletPolygon); // Добавляем его в FeatureGroup
-
-      // Включаем режим редактирования Leaflet для этого слоя
+      fg.addLayer(leafletPolygon);
       if (leafletPolygon.editing) {
         leafletPolygon.editing.enable();
-        console.log('[MapComponent useEffect] Enabled Leaflet editing for polygon:', editingMapPolygon.id);
-      } else {
-        console.error('[MapComponent useEffect] Leaflet polygon editing not available for this layer.');
+        if (leafletPolygon.editing._markers) {
+            leafletPolygon.editing._markers.forEach(marker => marker.bringToFront());
+        }
       }
-    } else if (!isEditingMode && editableFGRef.current) {
-      // Если режим редактирования выключен, очищаем все активные слои редактирования
-      editableFGRef.current.clearLayers();
-      console.log('[MapComponent useEffect] Editing mode off, cleared editable layers.');
+    } else if (!isEditingMode && fg.getLayers().length > 0) {
+        fg.eachLayer(layer => {
+            if (layer.editing && layer.editing.enabled()) {
+                layer.editing.disable();
+            }
+        });
+        fg.clearLayers();
     }
-  }, [isEditingMode, editableFGRef, editingMapPolygon]); // Зависимости для этого эффекта
+  }, [isEditingMode, editingMapPolygon, editableFGRef]);
+
+  const onEdited = useCallback((e) => {}, []);
+  const onDeleted = useCallback((e) => {}, []);
+
+  const sentinelLayerOptions = [
+    { id: '1_TRUE_COLOR', name: 'True Color (Естественные цвета)' },
+    { id: '2_FALSE_COLOR', name: 'False Color (Ложные цвета)' },
+    { id: '3_NDVI', name: 'NDVI (Индекс растительности)' },
+  ];
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !SENTINEL_HUB_INSTANCE_ID) return;
+
+    if (sentinelLayer) {
+      map.removeLayer(sentinelLayer);
+    }
+
+    const newSentinelLayer = L.tileLayer.wms(`https://services.sentinel-hub.com/ogc/wms/${SENTINEL_HUB_INSTANCE_ID}`, {
+      layers: sentinelLayerId,
+      format: 'image/png',
+      transparent: true,
+      maxcc: 20,
+      attribution: null, // Убираем аттрибуцию Leaflet
+      time: '2025-06-01/2025-06-24'
+    }).addTo(map);
+    setSentinelLayer(newSentinelLayer);
+
+    return () => {
+      if (map.hasLayer(newSentinelLayer)) {
+        map.removeLayer(newSentinelLayer);
+      }
+    };
+  }, [sentinelLayerId, SENTINEL_HUB_INSTANCE_ID]);
+
+  // --- Новый компонент пользовательского элемента управления Leaflet ---
+  const InfoAndSentinelControl = useMemo(() => {
+    return L.Control.extend({
+      onAdd: function(map) {
+        // Создаем div элемент для контрола
+        this._div = L.DomUtil.create('div', 'debug-info-block'); // Добавляем класс для отладки
+        
+        // Применяем FIXED позиционирование непосредственно к этому div
+        // Это обертка для вашего React-компонента
+        Object.assign(this._div.style, {
+            position: 'fixed', // Фиксированное позиционирование относительно окна просмотра
+            bottom: '16px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: '9999999', // Очень высокий z-index, чтобы быть ПОВЕРХ ВСЕГО
+            pointerEvents: 'auto', // Позволяем взаимодействовать с элементами
+            display: 'flex', // Для flexbox внутри
+            flexDirection: 'column', // Элементы друг под другом
+            alignItems: 'center', // Центрирование содержимого
+
+            // --- DEBUG СТИЛИ ---
+            width: '250px', // Задаем фиксированную ширину
+            height: '180px', // Задаем фиксированную высоту
+            border: '5px solid red', // Яркая красная рамка
+            backgroundColor: 'yellow', // Ярко-желтый фон
+            padding: '20px', // Увеличенный отступ
+            boxSizing: 'border-box', // Учитываем padding и border в width/height
+            // --- КОНЕЦ DEBUG СТИЛЕЙ ---
+        });
+
+        this._root = ReactDOM.createRoot(this._div);
+        this.update();
+
+        L.DomEvent.disableClickPropagation(this._div);
+        L.DomEvent.disableScrollPropagation(this._div);
+        
+        return this._div;
+      },
+      onRemove: function(map) {
+        if (this._root) {
+          this._root.unmount();
+        }
+      },
+      update: function() {
+        if (this._root) {
+          this._root.render(
+            // Здесь ваш React-компонент, без инлайн-стилей позиционирования,
+            // так как они теперь на родительском div._div
+            <div className="flex flex-col items-center space-y-3
+                            bg-white/10 rounded-2xl shadow-2xl p-4 backdrop-blur-lg border border-white/20">
+              {infoBoxVisible && (
+                <div
+                  className="text-white rounded-xl p-3 flex flex-col items-center justify-center space-y-1 w-full"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  <p className="text-base font-medium">
+                    Шир: <span className="font-semibold">{infoBoxLat}</span>, Дол: <span className="font-semibold">{infoBoxLng}</span>
+                  </p>
+                  <p className="text-base font-medium">NDVI:
+                    {infoBoxLoading ? (
+                      <span className="loader-spin ml-2 h-4 w-4 border-2 border-t-2 border-blue-500 rounded-full inline-block"></span>
+                    ) : (
+                      <span className="font-semibold ml-2">{infoBoxNdvi}</span>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              <div className="text-white rounded-xl p-3 flex flex-col items-start w-full">
+                <label htmlFor="sentinel-layer-select-control" className="text-sm font-medium mb-2 w-full text-center" >Выбрать слой Sentinel:</label>
+                <select
+                  id="sentinel-layer-select-control"
+                  value={sentinelLayerId}
+                  onChange={(e) => setSentinelLayerId(e.target.value)}
+                  className="bg-white/20 text-white rounded-lg text-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-300 border border-white/30 w-full hover:bg-white/30 transition-colors duration-200"
+                >
+                  {sentinelLayerOptions.map(option => (
+                    <option key={option.id} value={option.id} className="bg-gray-800 text-white">
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          );
+        }
+      }
+    });
+  }, [infoBoxVisible, infoBoxLat, infoBoxLng, infoBoxNdvi, infoBoxLoading, sentinelLayerId, setSentinelLayerId, sentinelLayerOptions]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!map.__customInfoControl) {
+      map.__customInfoControl = new InfoAndSentinelControl({ position: 'bottomleft' }); 
+      map.addControl(map.__customInfoControl);
+    }
+    
+    map.__customInfoControl.update();
+
+    return () => {
+      if (map.__customInfoControl && map.hasControl(map.__customInfoControl)) {
+          map.removeControl(map.__customInfoControl);
+          delete map.__customInfoControl;
+      }
+    };
+  }, [InfoAndSentinelControl, infoBoxVisible, infoBoxLat, infoBoxLng, infoBoxNdvi, infoBoxLoading, sentinelLayerId]);
+
 
   return (
     <MapContainer
-      center={[43.2567, 76.9286]}
+      center={[43.238949, 76.889709]}
       zoom={13}
-      style={{ height: '100%', flex: 1 }}
-      ref={mapRef}
-      whenCreated={(mapInstance) => {
-        mapRef.current = mapInstance;
-        setZoom(mapInstance.getZoom());
-      }}
+      style={{ flexGrow: 1, height: '100vh', width: '100%' }}
+      whenCreated={mapInstance => { mapRef.current = mapInstance; }}
     >
-      <MapInteractionHandler /> {/* Добавляем обработчик событий карты и доступ к экземпляру карты */}
-
-      {/* Тайловый слой карты (спутниковые снимки Google) */}
       <TileLayer
-        attribution="&copy; Google"
-        url="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+        attribution={null} // Убираем аттрибуцию Leaflet
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      {/* DrawingHandler: отвечает за рисование полигонов вручную */}
-      <DrawingHandler
-        onPolygonComplete={onPolygonComplete}
-        onStopAndSave={stopAndSaveDrawingFromMap} 
+      <MapContentAndInteractions
         isDrawing={isDrawing}
-        setIsDrawing={setIsDrawing}
-      />
-
-      {/* FeatureGroup для управления слоями, которые могут быть отредактированы с помощью EditControl */}
-      {/* Этот FeatureGroup и EditControl рендерятся ТОЛЬКО если isEditingMode активен */}
-      {isEditingMode && ( 
-        <FeatureGroup ref={editableFGRef}>
-          {/* EditControl теперь всегда внутри FeatureGroup, если FeatureGroup рендерится */}
-          <EditControl
-            position="topright"
-            onEdited={onPolygonEdited}
-            draw={{
-              polygon: false, rectangle: false, polyline: false,
-              circle: false, marker: false, circlemarker: false
-            }}
-            edit={{
-              featureGroup: editableFGRef.current, // editableFGRef.current будет доступен здесь, так как FeatureGroup уже отрендерился
-              remove: false, // Отключаем кнопку удаления
-              edit: false,   // Отключаем кнопку редактирования
-            }}
-          />
-        </FeatureGroup>
-      )}
-
-      {/* Компонент PolygonAndMarkerLayer: Отвечает за отображение всех полигонов.
-          Он находится вне FeatureGroup editableFGRef, чтобы избежать конфликтов и "пропадания" полигонов. */}
-      {/* Передаем функцию map.flyTo напрямую */}
-      <MapComponentInternalFlyTo
+        currentPath={currentPath}
+        setCurrentPath={setCurrentPath}
+        setHoveredPoint={setHoveredPoint}
+        onPolygonComplete={onPolygonComplete}
+        setInfoBoxLat={setInfoBoxLat}
+        setInfoBoxLng={setInfoBoxLng}
+        setInfoBoxVisible={setInfoBoxVisible}
+        baseApiUrl={baseApiUrl}
+        setInfoBoxLoading={setInfoBoxLoading}
+        setInfoBoxNdvi={setInfoBoxNdvi}
         polygons={polygons}
-        zoom={zoom}
+        editableFGRef={editableFGRef}
+        selectedPolygon={selectedPolygon}
+        isEditingMode={isEditingMode}
+        editingMapPolygon={editingMapPolygon}
+        onEdited={onEdited}
+        onDeleted={onDeleted}
         calculateArea={calculateArea}
         formatArea={formatArea}
-        selectedPolygon={selectedPolygon}
       />
     </MapContainer>
-  );
-}
-
-// Отдельный компонент для использования useMap и передачи flyToMarker
-function MapComponentInternalFlyTo({ polygons, zoom, calculateArea, formatArea, selectedPolygon }) {
-  const map = useMap(); // Получаем экземпляр карты Leaflet здесь
-  const flyToMarker = useCallback((latlng, newZoom = 15) => {
-    if (map) {
-      map.flyTo(latlng, newZoom, {
-        duration: 1.5, // Длительность анимации в секундах
-      });
-    }
-  }, [map]);
-
-  return (
-    <PolygonAndMarkerLayer
-      polygons={polygons}
-      zoom={zoom}
-      calculateArea={calculateArea}
-      formatArea={formatArea}
-      selectedPolygon={selectedPolygon}
-      flyToMarker={flyToMarker} // Передаем функцию flyToMarker
-    />
   );
 }

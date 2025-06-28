@@ -22,7 +22,7 @@ export default function PolygonAndMarkerLayer({ polygons, calculateArea, formatA
         // Leaflet polygon options
         const polygonOptions = {
           color: isSelected ? '#ff0000' : polygon.color, // Красный, если выделен
-          fillOpacity: 0, // Установлено 0 для прозрачной заливки
+          fillOpacity: 0.1, // Adjusted for better visibility when not selected, can be 0 if fully transparent is desired
           weight: isSelected ? 6 : 4, // <-- Толще граница: 6 для выделенного, 4 для остальных
           opacity: 1,
           lineJoin: 'round',
